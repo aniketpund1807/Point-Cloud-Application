@@ -1,0 +1,10 @@
+"D:/Design_&_Measurement_Tool/.construction_tool/Scripts/pip.exe" install PyQt6
+
+
+
+            "📊 : Worksheets"
+            "☁ : 3D Point Cloud"
+            "📐: Design"
+            "🏗 : Construction"
+            "📏: Measurement"
+            "⚙ : Settings"

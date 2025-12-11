@@ -1,0 +1,25 @@
+# Byte-compiled / cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual envs / conda
+.construction_tool/
+venv/
+env/
+.env/
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Logs and temporary
+*.log
+logs/
+tmp/
+temp/
+
+# OS files
+.DS_Store
+Thumbs.db
