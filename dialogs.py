@@ -1,11 +1,14 @@
 import numpy as np
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QGridLayout, QGroupBox, QCheckBox, 
-    QTextEdit, QComboBox, QDoubleSpinBox, QRadioButton, QButtonGroup, QWidget, QFileDialog, QInputDialog, QMessageBox
+    QTextEdit, QComboBox, QDoubleSpinBox, QRadioButton, QButtonGroup, QWidget, QFileDialog, QInputDialog, QMessageBox,
+    QScrollArea
 )
 from PyQt5.QtCore import Qt
 import os
 import json
+
+from datetime import datetime
 
 # ===========================================================================================================================
 # ** ZERO LINE DIALOG **
@@ -1862,72 +1865,209 @@ class CreateProjectDialog(QDialog):
 
 
 # ===========================================================================================================================
+# ** EXISTING WORKSHEET DIALOG - WITH CHECKBOXES FOR EASY SELECTION **
+# ===========================================================================================================================
+
+
+
+
 class ExistingWorksheetDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Open Existing Worksheet")
         self.setModal(True)
-        self.resize(600, 400)
+        self.resize(700, 550)
         self.selected_worksheet = None
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
+        # Main layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
 
+        # Title
         title = QLabel("Select an Existing Worksheet")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C; padding: 10px;")
-        layout.addWidget(title)
+        title.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            color: #4A148C;
+            padding: 10px;
+            background-color: #E8EAF6;
+            border-radius: 8px;
+        """)
+        main_layout.addWidget(title)
 
-        self.list_widget = QTextEdit()
-        self.list_widget.setReadOnly(True)
-        layout.addWidget(self.list_widget)
+        # Scrollable area for worksheets
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                border: 2px solid #BA68C8;
+                border-radius: 10px;
+                background-color: white;
+            }
+        """)
 
-        # Load worksheets
-        self.load_worksheets()
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(15, 15, 15, 15)
+        scroll_layout.setSpacing(12)
+        scroll_layout.setAlignment(Qt.AlignTop)
 
+        # Group box to contain all radio buttons (ensures only one selected)
+        self.radio_group_box = QGroupBox("Available Worksheets")
+        self.radio_group_box.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                color: #4A148C;
+                border: 2px solid #9C27B0;
+                border-radius: 10px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 15px;
+                padding: 0 8px;
+                background-color: white;
+            }
+        """)
+
+        radio_layout = QVBoxLayout(self.radio_group_box)
+        radio_layout.setSpacing(10)
+        radio_layout.setContentsMargins(10, 10, 10, 10)
+
+        # Button group to manage mutual exclusivity
+        self.button_group = QButtonGroup()
+        self.button_group.setExclusive(True)
+
+        # Load worksheets and create radio buttons
+        self.worksheets = []
+        self.radio_buttons = []  # To keep reference
+
+        if os.path.exists("worksheet.txt"):
+            try:
+                with open("worksheet.txt", 'r', encoding='utf-8') as f:
+                    lines = [line.strip() for line in f if line.strip()]
+                    if not lines:
+                        no_ws_label = QLabel("No worksheets found.")
+                        no_ws_label.setStyleSheet("color: #666; font-style: italic;")
+                        radio_layout.addWidget(no_ws_label)
+                    else:
+                        for line in lines:
+                            data = json.loads(line)
+                            self.worksheets.append(data)
+
+                            name = data.get("worksheet_name", "Unnamed Worksheet")
+                            proj = data.get("project_name", "No Project")
+                            date_str = data.get("created_at", "")
+                            if date_str:
+                                try:
+                                    date = datetime.fromisoformat(date_str.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
+                                except:
+                                    date = date_str[:19]
+                            else:
+                                date = "Unknown date"
+
+                            # Create radio button with rich text label
+                            radio = QRadioButton()
+                            label_text = f"<b>{name}</b><br>"
+                            label_text += f"<small>Project: <i>{proj}</i> | Created: {date}</small>"
+
+                            label = QLabel(label_text)
+                            label.setWordWrap(True)
+                            label.setStyleSheet("""
+                                QLabel {
+                                    background-color: #F8E8FF;
+                                    padding: 12px;
+                                    border-radius: 8px;
+                                    border: 1px solid #E1BEE7;
+                                }
+                            """)
+
+                            # Container for radio + label
+                            item_widget = QWidget()
+                            item_layout = QHBoxLayout(item_widget)
+                            item_layout.setContentsMargins(0, 0, 0, 0)
+                            item_layout.addWidget(radio)
+                            item_layout.addWidget(label, 1)
+
+                            radio_layout.addWidget(item_widget)
+
+                            # Add to button group
+                            self.button_group.addButton(radio)
+                            self.radio_buttons.append((radio, data))
+
+            except Exception as e:
+                error_label = QLabel(f"Error loading worksheets: {str(e)}")
+                error_label.setStyleSheet("color: red;")
+                radio_layout.addWidget(error_label)
+        else:
+            no_file_label = QLabel("No worksheet file found (worksheet.txt missing).")
+            no_file_label.setStyleSheet("color: #888; font-style: italic;")
+            radio_layout.addWidget(no_file_label)
+
+        scroll_layout.addWidget(self.radio_group_box)
+        scroll_layout.addStretch()
+
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll)
+
+        # Buttons at bottom
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
         open_btn = QPushButton("Open Selected")
-        open_btn.clicked.connect(self.open_selected)
+        open_btn.setFixedWidth(140)
+        open_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #AB47BC, stop:1 #8E24AA);
+                color: white;
+                border: none;
+                padding: 12px;
+                border-radius: 20px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #9C27B0, stop:1 #7B1FA2);
+            }
+        """)
+        open_btn.clicked.connect(self.open_selected_worksheet)
         btn_layout.addWidget(open_btn)
 
         cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedWidth(100)
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #E1BEE7, stop:1 #CE93D8);
+                color: #333;
+                border: none;
+                padding: 12px;
+                border-radius: 20px;
+                font-weight: bold;
+            }
+        """)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 
-        layout.addLayout(btn_layout)
+        main_layout.addLayout(btn_layout)
 
-    def load_worksheets(self):
-        text = "<h3>Available Worksheets:</h3><ul>"
-        self.worksheets = []
-        if os.path.exists("worksheet.txt"):
-            try:
-                with open("worksheet.txt", 'r', encoding='utf-8') as f:
-                    for line_num, line in enumerate(f, 1):
-                        line = line.strip()
-                        if line:
-                            data = json.loads(line)
-                            self.worksheets.append(data)
-                            proj = data.get("project_name", "No Project")
-                            name = data.get("worksheet_name", "Unnamed")
-                            date = data.get("created_at", "")[:10]
-                            text += f"<li><b>{name}</b> (Project: {proj}) - {date}</li>"
-                text += "</ul><p><i>Click 'Open Selected' and type the worksheet name above to open.</i></p>"
-            except Exception as e:
-                text = f"<p>Error loading worksheets: {e}</p>"
-        else:
-            text = "<p>No worksheets found.</p>"
+    def open_selected_worksheet(self):
+        """Handle opening the selected worksheet"""
+        selected_button = self.button_group.checkedButton()
+        if not selected_button:
+            QMessageBox.information(self, "No Selection", "Please select a worksheet to open.")
+            return
 
-        self.list_widget.setHtml(text)
+        # Find the corresponding worksheet data
+        for radio, data in self.radio_buttons:
+            if radio is selected_button:
+                self.selected_worksheet = data
+                self.accept()
+                return
 
-    def open_selected(self):
-        # Simple: let user type name to confirm
-        name, ok = QInputDialog.getText(self, "Confirm Worksheet", "Enter worksheet name to open:")
-        if ok and name:
-            for ws in self.worksheets:
-                if ws.get("worksheet_name") == name:
-                    self.selected_worksheet = ws
-                    self.accept()
-                    return
-            QMessageBox.warning(self, "Not Found", "Worksheet not found with that name.")
+        QMessageBox.warning(self, "Error", "Could not retrieve selected worksheet.")
