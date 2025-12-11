@@ -618,7 +618,7 @@ class ConstructionConfigDialog(QDialog):
 class MaterialLineDialog(QDialog):
     def __init__(self, material_data=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Material line Configuration")
+        self.setWindowTitle("Create New Construction Layer")
         #self.setGeometry(300, 130, 500, 600)
         self.setModal(True)
         self.setFixedSize(500, 650)
@@ -674,6 +674,15 @@ class MaterialLineDialog(QDialog):
         desc_layout.addWidget(desc_label)
         desc_layout.addWidget(self.desc_input, 1)
         layout.addLayout(desc_layout)
+
+        type_layout = QHBoxLayout()
+        type_label = QLabel("Material Type:")
+        type_label.setFixedWidth(150)
+        self.type_input = QLineEdit()
+        self.type_input.setPlaceholderText("Enter material type")
+        type_layout.addWidget(type_label)
+        type_layout.addWidget(self.type_input, 1)   
+        layout.addLayout(type_layout)
         
         # Add spacer
         layout.addSpacing(10)
@@ -873,7 +882,7 @@ class MeasurementDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Measurement Configuration")
-        self.setGeometry(100, 130, 200, 200)
+        # self.setGeometry(100, 130, 200, 200)
         self.setModal(True)
         self.setMinimumWidth(520)
         self.setStyleSheet("""
@@ -1050,7 +1059,7 @@ class DesignNewDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Create New Design Layer")
-        self.setGeometry(210, 130, 200, 200)
+        # self.setGeometry(210, 130, 200, 200)
         self.setModal(True)
         self.setMinimumWidth(440)
         self.setStyleSheet("""
@@ -1133,15 +1142,13 @@ class DesignNewDialog(QDialog):
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C; padding: 10px;")
         layout.addWidget(title)
 
-        # -------- Layer Name --------
-        name_layout = QHBoxLayout()
-        name_label = QLabel("Layer Name:")
-        name_label.setFixedWidth(100)
-        self.le_layer_name = QLineEdit()
-        self.le_layer_name.setPlaceholderText("Enter layer name")
-        name_layout.addWidget(name_label)
-        name_layout.addWidget(self.le_layer_name, 1)
-        layout.addLayout(name_layout)   
+        # ------------------ Layer Name -----------------
+        layer_name = QLabel("Layer Name:")
+        layer_name.setStyleSheet("font-weight: bold;")
+        layout.addWidget(layer_name)
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Enter layer name")
+        layout.addWidget(self.name_edit)
         
         # === Layer Dimension (3D / 2D) ===
         dim_group = QGroupBox("Layer Type")
@@ -1279,7 +1286,7 @@ class WorksheetNewDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("New Worksheet")
-        self.setGeometry(100, 130, 200, 200)
+        # self.setGeometry(100, 130, 200, 200)
         self.setModal(True)
         self.resize(480, 380)
 
@@ -1371,8 +1378,9 @@ class WorksheetNewDialog(QDialog):
         # Worksheet Type (dropdown)
         form.addWidget(QLabel("Worksheet Type:"), 1, 0)
         self.type_combo = QComboBox()
-        self.type_combo.addItems(["", "Design", "Construction", "Measurement"])
+        self.type_combo.addItems(["None", "Design", "Construction", "Measurement"])
         form.addWidget(self.type_combo, 1, 1)
+
 
         # Project Name
         form.addWidget(QLabel("Project Name:"), 2, 0)
@@ -1383,8 +1391,17 @@ class WorksheetNewDialog(QDialog):
         # Worksheet Category (dropdown)
         form.addWidget(QLabel("Worksheet Category:"), 3, 0)
         self.category_combo = QComboBox()
-        self.category_combo.addItems(["", "Road", "Bridge","Other"])
+        self.category_combo.addItems(["None", "Road", "Bridge","Other"])
         form.addWidget(self.category_combo, 3, 1)
+
+        # === Layer Dimension (3D / 2D) ===
+        dim_group = QGroupBox("Layer Type")
+        dim_layout = QHBoxLayout(dim_group)
+        self.radio_3d = QRadioButton("3D")
+        self.radio_2d = QRadioButton("2D")
+        dim_layout.addWidget(self.radio_3d)
+        dim_layout.addWidget(self.radio_2d)
+        form.addWidget(dim_group)
 
         main_layout.addLayout(form)
 
@@ -1417,7 +1434,6 @@ class WorksheetNewDialog(QDialog):
             "worksheet_category": self.category_combo.currentText()
         }
     
-
 # ===========================================================================================================================
 #                                                ** HELP Dialog Box **
 # ===========================================================================================================================
@@ -1482,4 +1498,174 @@ class HelpDialog(QDialog):
         button_layout.addWidget(close_button)
         button_layout.addStretch()
         layout.addLayout(button_layout)
-    # ----------------------------------------------------------------------
+
+
+# ===========================================================================================================================
+# NEW DIALOG: Construction Layer Creation Dialog (as shown in your image)
+# ===========================================================================================================================
+
+class ConstructionConfigDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Construction Layer")
+        self.setFixedSize(380, 500)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #F5F5F5;
+                font-family: Segoe UI;
+            }
+            QLabel {
+                font-size: 13px;
+                color: #333;
+            }
+            QLineEdit {
+                padding: 8px;
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                font-size: 13px;
+            }
+            QRadioButton {
+                font-size: 13px;
+                spacing: 8px;
+            }
+            QPushButton {
+                padding: 10px;
+                border-radius: 6px;
+                font-weight: bold;
+                min-width: 90px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Title
+        title = QLabel("Create New Construction Layer")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C;")
+        layout.addWidget(title)
+
+        # Layer Name
+        Layer_name = QLabel("Layer Name:")
+        Layer_name.setStyleSheet("font-weight: bold;")
+        layout.addWidget(Layer_name)
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Enter layer name")
+        layout.addWidget(self.name_edit)
+
+        # Type Selection: Road or Bridge
+        type_group = QGroupBox("Type")
+        type_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        type_layout = QHBoxLayout()
+        self.road_radio = QRadioButton("Road")
+        self.bridge_radio = QRadioButton("Bridge")
+        type_layout.addWidget(self.road_radio)
+        type_layout.addWidget(self.bridge_radio)
+        type_group.setLayout(type_layout)
+        layout.addWidget(type_group)
+
+        # Reference Layer of 2D design Layer (BOLD)
+        ref_layer_label = QLabel("Reference Layer of 2D design Layer:")
+        ref_layer_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(ref_layer_label)
+
+        self.ref_layer_combo = QComboBox()
+        self.ref_layer_combo.setEditable(True)
+        self.ref_layer_combo.addItems(["None", "Design_Layer_01", "Design_Layer_02", "Design_Layer_03"])
+        self.ref_layer_combo.setCurrentIndex(0)
+        layout.addWidget(self.ref_layer_combo)
+
+        # 2D Layer refer to Base lines (BOLD)
+        base_lines_label = QLabel("2D Layer refer to Base lines :")
+        base_lines_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(base_lines_label)
+
+        self.base_lines_combo = QComboBox()
+        self.base_lines_combo.setEditable(True)
+        layout.addWidget(self.base_lines_combo)
+
+        # === DYNAMIC BASE LINES LOGIC ===
+        self.road_base_lines = [
+            "None", 
+            "Zero Line", 
+            "Surface Line", 
+            "Construction Line", 
+            "Road Surface Line"
+        ]
+        self.bridge_base_lines = [
+            "None", 
+            "Zero Line", 
+            "Projection Line", 
+            "Construction Dots", 
+            "Deck Line"
+        ]
+
+        # Set initial (Road) items
+        self.update_base_lines()
+
+        # Connect radio buttons to update dropdown
+        self.road_radio.toggled.connect(self.update_base_lines)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        self.ok_button = QPushButton("OK")
+        self.ok_button.setStyleSheet("""
+            QPushButton {
+                background-color: #7B1FA2;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #9C27B0;
+            }
+        """)
+
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setStyleSheet("""
+            QPushButton {
+                background-color: #B0BEC5;
+                color: #333;
+            }
+            QPushButton:hover {
+                background-color: #90A4AE;
+            }
+        """)
+
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+
+        button_layout.addWidget(self.ok_button)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+
+    def update_base_lines(self):
+        """Update the Base Lines dropdown based on selected type (Road/Bridge)"""
+        current_text = self.base_lines_combo.currentText()  # Remember current selection
+
+        self.base_lines_combo.clear()
+
+        if self.road_radio.isChecked():
+            items = self.road_base_lines
+        else:
+            items = self.bridge_base_lines
+
+        self.base_lines_combo.addItems(items)
+
+        # Try to restore previous selection if it still exists
+        index = self.base_lines_combo.findText(current_text)
+        if index >= 0:
+            self.base_lines_combo.setCurrentIndex(index)
+        else:
+            self.base_lines_combo.setCurrentIndex(0)  # default to "None"
+
+    def get_data(self):
+        """Return all entered data as dict"""
+        return {
+            'layer_name': self.name_edit.text().strip(),
+            'is_road': self.road_radio.isChecked(),
+            'is_bridge': self.bridge_radio.isChecked(),
+            'reference_layer': self.ref_layer_combo.currentText().strip(),
+            'base_lines_layer': self.base_lines_combo.currentText().strip()
+        }

@@ -168,6 +168,7 @@ class PointCloudViewer(QMainWindow):
         self.polygon_outer_surface_meters = 0.0
         self.presized_volume = 0.0
         self.presized_outer_surface = 0.0
+
         # NEW: View control states
         self.freeze_view = False # Track if view is frozen
         self.plotting_active = True # Track if plotting is active
@@ -175,6 +176,10 @@ class PointCloudViewer(QMainWindow):
         self.all_graph_lines = []
         self.redo_stack = []
         self.current_redo_points = []
+
+
+
+        self.construction_layer_created = False  # Track if a construction layer was created
 
         # Add this new variable to store point labels
         self.point_labels = []  # For storing point label annotations
@@ -198,8 +203,7 @@ class PointCloudViewer(QMainWindow):
         self.curve_annotation_x_pos = None
         self.current_curve_config = {'outer_curve': False, 'inner_curve': False, 'angle': 0.0}
 
-
-                # To store the last point of the surface line (for curve annotation)
+        # To store the last point of the surface line (for curve annotation)
         self.last_surface_point_x = None
 
         self.curve_annotation_x_pos = None  # To remember where it is placed
@@ -356,7 +360,8 @@ class PointCloudViewer(QMainWindow):
         # ------------------------------------------------------------------
         (self.worksheet_button, dropdown1,
          self.new_worksheet_button, self.existing_worksheet_button) = create_dropdown_button(
-            "Worksheet", "📊", width=130)
+            "\n Worksheet", "📊", width=130)
+        self.worksheet_button.setStyleSheet("font-weight: bold;")
 
         self.new_worksheet_button.clicked.connect(self.open_new_worksheet_dialog)
         # self.existing_worksheet_button.clicked.connect(your_function_here)
@@ -368,7 +373,8 @@ class PointCloudViewer(QMainWindow):
         # ------------------------------------------------------------------
         (self.design_button, dropdown2,
          self.new_design_button, self.existing_design_button) = create_dropdown_button(
-            "Design", "📐", width=130)
+            "\n Design", "📐", width=130)
+        self.design_button.setStyleSheet("font-weight: bold;")
 
         self.new_design_button.clicked.connect(self.open_create_new_design_layer_dialog)
         top_layout.addWidget(self.design_button)
@@ -378,9 +384,10 @@ class PointCloudViewer(QMainWindow):
         # ------------------------------------------------------------------
         (self.construction_button, dropdown3,
          self.new_construction_button, self.existing_construction_button) = create_dropdown_button(
-            "Construction", "🏗", width=150)
+            "\n Construction", "🏗", width=150)
+        self.construction_button.setStyleSheet("font-weight: bold;")
 
-        self.new_construction_button.clicked.connect(self.open_material_line_dialog)
+        self.new_construction_button.clicked.connect(self.open_construction_layer_dialog)
         top_layout.addWidget(self.construction_button)
 
         # ------------------------------------------------------------------
@@ -388,7 +395,8 @@ class PointCloudViewer(QMainWindow):
         # ------------------------------------------------------------------
         (self.measurement_button, dropdown4,
          self.new_measurement_button, self.existing_measurement_button) = create_dropdown_button(
-            "Measurement", "📏", width=150)
+            "\n Measurement", "📏", width=150)
+        self.measurement_button.setStyleSheet("font-weight: bold;")
 
         self.new_measurement_button.clicked.connect(self.open_measurement_dialog)
         top_layout.addWidget(self.measurement_button)
@@ -396,18 +404,22 @@ class PointCloudViewer(QMainWindow):
         # ------------------------------------------------------------------
         # Other buttons (unchanged)
         # ------------------------------------------------------------------
-        self.layers_button = QPushButton("Layers")
+        self.layers_button = QPushButton("📚 \n Layers")
+        self.layers_button.setStyleSheet("font-weight: bold;")
         top_layout.addWidget(self.layers_button)
 
-        self.load_button = QPushButton("☁ 3D Point Cloud")
+        self.load_button = QPushButton("💠 \n 3D Point Cloud")
+        self.load_button.setStyleSheet("font-weight: bold;")
         self.load_button.setFixedWidth(180)
         self.load_button.clicked.connect(self.load_point_cloud)
         top_layout.addWidget(self.load_button)
 
-        self.help_button = QPushButton("❓ Help")
+        self.help_button = QPushButton("❓\n Help")
+        self.help_button.setStyleSheet("font-weight: bold;")
         top_layout.addWidget(self.help_button)
 
-        self.setting_button = QPushButton("⚙ Settings")
+        self.setting_button = QPushButton("⚙ \n Settings")
+        self.setting_button.setStyleSheet("font-weight: bold;")
         self.setting_button.setFixedWidth(110)
         top_layout.addWidget(self.setting_button)
 
@@ -828,6 +840,79 @@ class PointCloudViewer(QMainWindow):
         undo_layout.addStretch()
         line_layout.addWidget(undo_container)
 
+
+        # Additional buttons - NOW INCLUDING "Add Material Line" at top
+        self.add_material_line_button = QPushButton("Add Material Line")
+        self.add_material_line_button.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                padding: 10px;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover { background-color: #F57C00; }
+            QPushButton:pressed { background-color: #EF6C00; }
+        """)
+        self.add_material_line_button.setVisible(False)  # Hidden initially
+        self.add_material_line_button.clicked.connect(self.open_material_line_dialog)
+        line_layout.addWidget(self.add_material_line_button)
+
+        # Existing buttons (Curve, Map on 3D)
+        self.preview_button = QPushButton("Curve")
+        self.threed_map_button = QPushButton("Map on 3D")
+        
+        self.preview_button.setStyleSheet(""" QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                padding: 10px;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover { background-color: #F57C00; }
+            QPushButton:pressed { background-color: #EF6C00; } """)  # keep your existing style
+        
+        self.threed_map_button.setStyleSheet(""" QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                padding: 10px;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover { background-color: #F57C00; }
+            QPushButton:pressed { background-color: #EF6C00; } """)  # keep your existing style
+        
+        self.preview_button.setVisible(False)
+        self.threed_map_button.setVisible(False)
+        
+        line_layout.addWidget(self.preview_button)
+        line_layout.addWidget(self.threed_map_button)
+
+        # Save button - at the bottom
+        self.save_button = QPushButton("Save")
+        self.save_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 12px;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 16px;
+            }
+            QPushButton:hover { background-color: #45a049; }
+            QPushButton:pressed { background-color: #3d8b40; }
+        """)
+        self.save_button.setVisible(False)  # Hidden until construction layer created
+        line_layout.addWidget(self.save_button)
+        line_layout.addStretch()
+
         # Function to create checkbox rows
         def create_line_checkbox_with_pencil(checkbox_text, info_text, item_id, color_style=""):
             container = QWidget()
@@ -1198,8 +1283,6 @@ class PointCloudViewer(QMainWindow):
 
         # Initialize slider-scroll sync
         QTimer.singleShot(100, self.initialize_slider_scroll_sync)
-
-
 
     # ----------------------------------------------------------------------
     # Close dropdown when clicking outside
@@ -1611,6 +1694,47 @@ class PointCloudViewer(QMainWindow):
         self.presized_button.setVisible(False)
         self.metrics_group.setVisible(False)
 
+
+
+# # ======================================================================
+    def open_construction_layer_dialog(self):
+        """Open the Construction Layer creation dialog"""
+        dialog = ConstructionConfigDialog(self)  # This uses the dialog you already have
+        if dialog.exec_() == QDialog.Accepted:
+            config = dialog.get_data()
+            layer_name = config['layer_name']
+            if not layer_name.strip():
+                QMessageBox.warning(self, "Invalid Name", "Please enter a valid layer name.")
+                return
+
+            # Successfully created construction layer
+            self.construction_layer_created = True
+
+            # Show the Add Material Line and Save buttons
+            self.add_material_line_button.setVisible(True)
+            self.save_button.setVisible(True)
+
+            # Also show bottom section if not already visible
+            self.bottom_section.setVisible(True)
+
+            # Optional: Show relevant checkboxes based on Road/Bridge
+            if config['is_road']:
+                self.current_mode = 'road'
+                self.surface_container.setVisible(True)
+                self.construction_container.setVisible(True)
+                self.road_surface_container.setVisible(True)
+                self.zero_container.setVisible(True)
+            elif config['is_bridge']:
+                self.current_mode = 'bridge'
+                self.deck_line_container.setVisible(True)
+                self.projection_container.setVisible(True)
+                self.construction_dots_container.setVisible(True)
+                self.bridge_zero_container.setVisible(True)
+
+            self.message_text.append(f"Construction layer '{layer_name}' created successfully.")
+            self.message_text.append(f"Type: {'Road' if config['is_road'] else 'Bridge'}")
+            self.message_text.append(f"Reference 2D Layer: {config['reference_layer']}")
+            self.message_text.append(f"Base Line: {config['base_lines_layer']}")
 
     # ======================================================================
     # OPEN MATERIAL LINE DIALOG WHEN "Construction → New" IS CLICKED
