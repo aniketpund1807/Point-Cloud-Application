@@ -1,9 +1,11 @@
 import numpy as np
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QGridLayout, QGroupBox, QCheckBox, 
-    QTextEdit, QComboBox, QDoubleSpinBox, QRadioButton, QButtonGroup, QWidget
+    QTextEdit, QComboBox, QDoubleSpinBox, QRadioButton, QButtonGroup, QWidget, QFileDialog, QInputDialog, QMessageBox
 )
 from PyQt5.QtCore import Qt
+import os
+import json
 
 # ===========================================================================================================================
 # ** ZERO LINE DIALOG **
@@ -1286,7 +1288,6 @@ class WorksheetNewDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("New Worksheet")
-        # self.setGeometry(100, 130, 200, 200)
         self.setModal(True)
         self.resize(480, 380)
 
@@ -1322,6 +1323,35 @@ class WorksheetNewDialog(QDialog):
                 image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM4RTI0QUEiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNyAxMGw1IDUgNS01Ii8+PC9zdmc+);
                 width: 16px;
                 height: 16px;
+            }
+            QGroupBox {
+                border: 2px solid #BA68C8;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 12px;
+                font-weight: bold;
+                color: #4A148C;
+                background-color: rgba(255, 255, 255, 0.7);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 8px 0 8px;
+            }
+            QRadioButton {
+                padding: 6px;
+                color: #2d1b3d;
+                font-weight: normal;
+            }
+            QRadioButton::indicator {
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                border: 2px solid #BA68C8;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #8E24AA;
+                border: 2px solid #8E24AA;
             }
             QPushButton {
                 border-radius: 20px;
@@ -1381,27 +1411,43 @@ class WorksheetNewDialog(QDialog):
         self.type_combo.addItems(["None", "Design", "Construction", "Measurement"])
         form.addWidget(self.type_combo, 1, 1)
 
-
-        # Project Name
+        # Project Name (dropdown) - populated from project_config.txt
         form.addWidget(QLabel("Project Name:"), 2, 0)
-        self.project_edit = QLineEdit()
-        self.project_edit.setPlaceholderText("Enter project name")
-        form.addWidget(self.project_edit, 2, 1)
+        self.project_combo = QComboBox()
+        self.project_combo.addItem("None")  # Default option
+
+        # Load projects from project_config.txt
+        if os.path.exists("project_config.txt"):
+            try:
+                with open("project_config.txt", 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            proj = json.loads(line)
+                            self.project_combo.addItem(proj["project_name"])
+            except Exception as e:
+                print(f"Error loading projects: {e}")
+
+        form.addWidget(self.project_combo, 2, 1)
 
         # Worksheet Category (dropdown)
         form.addWidget(QLabel("Worksheet Category:"), 3, 0)
         self.category_combo = QComboBox()
-        self.category_combo.addItems(["None", "Road", "Bridge","Other"])
+        self.category_combo.addItems(["None", "Road", "Bridge", "Other"])
         form.addWidget(self.category_combo, 3, 1)
 
-        # === Layer Dimension (3D / 2D) ===
-        dim_group = QGroupBox("Layer Type")
+        # === Layer Type (3D / 2D) ===
+        form.addWidget(QLabel("Layer Type:"), 4, 0)
+        dim_group = QWidget()
         dim_layout = QHBoxLayout(dim_group)
+        dim_layout.setContentsMargins(0, 0, 0, 0)
         self.radio_3d = QRadioButton("3D")
         self.radio_2d = QRadioButton("2D")
+
         dim_layout.addWidget(self.radio_3d)
         dim_layout.addWidget(self.radio_2d)
-        form.addWidget(dim_group)
+        dim_layout.addStretch()
+        form.addWidget(dim_group, 4, 1)
 
         main_layout.addLayout(form)
 
@@ -1427,13 +1473,15 @@ class WorksheetNewDialog(QDialog):
     # Helper – return everything the main window needs
     # ----------------------------------------------------------------------
     def get_data(self):
+        layer_type = "3D" if self.radio_3d.isChecked() else "2D"
         return {
             "worksheet_name": self.name_edit.text().strip(),
             "worksheet_type": self.type_combo.currentText(),
-            "project_name": self.project_edit.text().strip(),
-            "worksheet_category": self.category_combo.currentText()
+            "project_name": self.project_combo.currentText() if self.project_combo.currentText() != "None" else "",
+            "worksheet_category": self.category_combo.currentText(),
+            "layer_type": layer_type
         }
-    
+
 # ===========================================================================================================================
 #                                                ** HELP Dialog Box **
 # ===========================================================================================================================
@@ -1669,3 +1717,217 @@ class ConstructionConfigDialog(QDialog):
             'reference_layer': self.ref_layer_combo.currentText().strip(),
             'base_lines_layer': self.base_lines_combo.currentText().strip()
         }
+
+
+# ===========================================================================================================================
+# ** CREATE PROJECT DIALOG **
+# ===========================================================================================================================
+class CreateProjectDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create New Project")
+        self.setModal(True)
+        self.setMinimumWidth(560)
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #f0e6fa, stop:1 #e6e6fa);
+                border-radius: 18px;
+            }
+            QLabel {
+                color: #2d1b3d;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QLineEdit {
+                border: 2px solid #BA68C8;
+                border-radius: 8px;
+                padding: 8px;
+                background-color: white;
+            }
+            QLineEdit:focus {
+                border: 2px solid #8E24AA;
+                background-color: #F8E8FF;
+            }
+            QComboBox {
+                border: 2px solid #BA68C8;
+                border-radius: 8px;
+                padding: 8px;
+                background-color: white;
+            }
+            QComboBox:focus {
+                border: 2px solid #8E24AA;
+                background-color: #F8E8FF;
+            }
+            QPushButton {
+                border-radius: 20px;
+                padding: 11px;
+                font-weight: bold;
+                min-width: 100px;
+                border: none;
+            }
+            QPushButton#okBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #AB47BC, stop:1 #8E24AA);
+                color: white;
+            }
+            QPushButton#okBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #9C27B0, stop:1 #7B1FA2);
+            }
+            QPushButton#cancelBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #E1BEE7, stop:1 #CE93D8);
+                color: #333;
+            }
+            QPushButton#cancelBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #D1C4E9, stop:1 #BA68C8);
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(18)
+
+        # Title
+        title = QLabel("Create New Project")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C;")
+        layout.addWidget(title)
+
+        # Project Name
+        layout.addWidget(QLabel("Project Name:"))
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Enter project name")
+        layout.addWidget(self.name_edit)
+
+        # Link 3D Files
+        layout.addWidget(QLabel("Link 3D Point Cloud Files:"))
+        file_layout = QHBoxLayout()
+        self.file_label = QLabel("No files selected")
+        self.file_label.setStyleSheet("color: #555; font-style: italic;")
+        file_layout.addWidget(self.file_label)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self.browse_files)
+        file_layout.addWidget(browse_btn)
+        layout.addLayout(file_layout)
+
+        self.selected_files = []  # stores list of file paths
+
+        # Project Properties dropdown
+        layout.addWidget(QLabel("Project Properties:"))
+        self.properties_combo = QComboBox()
+        self.properties_combo.addItems(["Design", "Construction", "Measurement", "Other"])
+        layout.addWidget(self.properties_combo)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        ok_btn = QPushButton("OK")
+        ok_btn.setObjectName("okBtn")
+        ok_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(ok_btn)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("cancelBtn")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+    def browse_files(self):
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select 3D Point Cloud Files",
+            "",
+            "Point Cloud Files (*.las *.laz *.ply *.pts *.xyz);;All Files (*)"
+        )
+        if files:
+            self.selected_files = files
+            if len(files) > 5:
+                display_text = f"{len(files)} files selected"
+            else:
+                display_text = ", ".join([os.path.basename(f) for f in files])
+            self.file_label.setText(display_text)
+            self.file_label.setStyleSheet("color: #000; font-style: normal;")
+
+    def get_data(self):
+        """Return all entered data"""
+        return {
+            "project_name": self.name_edit.text().strip(),
+            "pointcloud_files": self.selected_files.copy(),
+            "properties": self.properties_combo.currentText()
+        }
+    
+
+
+
+# ===========================================================================================================================
+class ExistingWorksheetDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Open Existing Worksheet")
+        self.setModal(True)
+        self.resize(600, 400)
+        self.selected_worksheet = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        title = QLabel("Select an Existing Worksheet")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C; padding: 10px;")
+        layout.addWidget(title)
+
+        self.list_widget = QTextEdit()
+        self.list_widget.setReadOnly(True)
+        layout.addWidget(self.list_widget)
+
+        # Load worksheets
+        self.load_worksheets()
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        open_btn = QPushButton("Open Selected")
+        open_btn.clicked.connect(self.open_selected)
+        btn_layout.addWidget(open_btn)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+
+    def load_worksheets(self):
+        text = "<h3>Available Worksheets:</h3><ul>"
+        self.worksheets = []
+        if os.path.exists("worksheet.txt"):
+            try:
+                with open("worksheet.txt", 'r', encoding='utf-8') as f:
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        if line:
+                            data = json.loads(line)
+                            self.worksheets.append(data)
+                            proj = data.get("project_name", "No Project")
+                            name = data.get("worksheet_name", "Unnamed")
+                            date = data.get("created_at", "")[:10]
+                            text += f"<li><b>{name}</b> (Project: {proj}) - {date}</li>"
+                text += "</ul><p><i>Click 'Open Selected' and type the worksheet name above to open.</i></p>"
+            except Exception as e:
+                text = f"<p>Error loading worksheets: {e}</p>"
+        else:
+            text = "<p>No worksheets found.</p>"
+
+        self.list_widget.setHtml(text)
+
+    def open_selected(self):
+        # Simple: let user type name to confirm
+        name, ok = QInputDialog.getText(self, "Confirm Worksheet", "Enter worksheet name to open:")
+        if ok and name:
+            for ws in self.worksheets:
+                if ws.get("worksheet_name") == name:
+                    self.selected_worksheet = ws
+                    self.accept()
+                    return
+            QMessageBox.warning(self, "Not Found", "Worksheet not found with that name.")

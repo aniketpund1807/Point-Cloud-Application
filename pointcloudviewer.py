@@ -28,7 +28,7 @@ from vtkmodules.vtkRenderingCore import (vtkActor, vtkPolyDataMapper, vtkRendere
 from vtkmodules.vtkCommonColor import vtkNamedColors
 
 from dialogs import (ConstructionConfigDialog, CurveDialog, ZeroLineDialog, MaterialLineDialog, MeasurementDialog,
-                    DesignNewDialog, WorksheetNewDialog, HelpDialog)
+                    DesignNewDialog, WorksheetNewDialog, HelpDialog, CreateProjectDialog, ExistingWorksheetDialog)
 from utils import find_best_fitting_plane
 from math import sqrt, acos, degrees, pi, atan2
 
@@ -43,6 +43,7 @@ class PointCloudViewer(QMainWindow):
         super().__init__()
 
         self.WORKSHEET_FILE = "worksheet.txt"
+        self.PROJECT_FILE = "project_config.txt"
 
         # Worksheet display area (top of left panel)
         self.worksheet_display = QGroupBox("Current Worksheet")
@@ -354,6 +355,17 @@ class PointCloudViewer(QMainWindow):
             dropdown.installEventFilter(self)
 
             return btn, dropdown, btn_new, btn_existing
+        
+        # ------------------------------------------------------------------
+        # Create Project Button
+        # ------------------------------------------------------------------
+        self.create_project_button = QPushButton("➕ \n Create Project"
+                                        )
+        self.create_project_button.setStyleSheet("font-weight: bold;")
+        self.create_project_button.setFixedWidth(130)
+        self.create_project_button.clicked.connect(self.open_create_project_dialog)
+        top_layout.addWidget(self.create_project_button)
+
 
         # ------------------------------------------------------------------
         # Worksheet button + dropdown
@@ -364,7 +376,8 @@ class PointCloudViewer(QMainWindow):
         self.worksheet_button.setStyleSheet("font-weight: bold;")
 
         self.new_worksheet_button.clicked.connect(self.open_new_worksheet_dialog)
-        # self.existing_worksheet_button.clicked.connect(your_function_here)
+
+        self.existing_worksheet_button.clicked.connect(self.open_existing_worksheet)
 
         top_layout.addWidget(self.worksheet_button)
 
@@ -408,9 +421,9 @@ class PointCloudViewer(QMainWindow):
         self.layers_button.setStyleSheet("font-weight: bold;")
         top_layout.addWidget(self.layers_button)
 
-        self.load_button = QPushButton("💠 \n 3D Point Cloud")
+        self.load_button = QPushButton("📡 \n 3D Point Cloud")
         self.load_button.setStyleSheet("font-weight: bold;")
-        self.load_button.setFixedWidth(180)
+        self.load_button.setFixedWidth(130)
         self.load_button.clicked.connect(self.load_point_cloud)
         top_layout.addWidget(self.load_button)
 
@@ -1503,6 +1516,44 @@ class PointCloudViewer(QMainWindow):
 
     # -------------------------------------------------
 
+
+    def open_create_project_dialog(self):
+        dialog = CreateProjectDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            project_name = data["project_name"].strip()
+            pointcloud_files = data["pointcloud_files"]
+            properties = data["properties"]
+
+            if not project_name:
+                QMessageBox.warning(self, "Error", "Project name is required!")
+                return
+
+            if not pointcloud_files:
+                QMessageBox.warning(self, "Error", "At least one point cloud file must be selected!")
+                return
+
+            # Prepare project entry
+            project_entry = {
+                "project_name": project_name,
+                "pointcloud_files": pointcloud_files,
+                "properties": properties,
+                "created_at": datetime.now().isoformat()
+            }
+
+            # Save to project_config.txt (append as JSON line)
+            try:
+                with open(self.PROJECT_FILE, 'a', encoding='utf-8') as f:
+                    json.dump(project_entry, f)
+                    f.write('\n')
+                self.message_text.append(f"Project '{project_name}' created successfully with {len(pointcloud_files)} file(s).")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to save project: {str(e)}")
+                return
+
+            # Optional: Refresh any project lists if needed
+            QMessageBox.information(self, "Success", f"Project '{project_name}' has been created!")
+
     def open_new_worksheet_dialog(self):
         """Open the New Worksheet dialog"""
         dialog = WorksheetNewDialog(self)
@@ -1558,6 +1609,18 @@ class PointCloudViewer(QMainWindow):
         self.worksheet_info_label.setText(info)
         self.worksheet_display.setVisible(True)
         self.worksheet_display.setTitle(f"Active: {data['worksheet_name']}")
+
+
+    def save_current_worksheet(self, worksheet_data):
+        """Append worksheet data with project link"""
+        try:
+            with open(self.WORKSHEET_FILE, 'a', encoding='utf-8') as f:
+                json.dump(worksheet_data, f)
+                f.write('\n')
+            self.message_text.append(f"Worksheet '{worksheet_data['worksheet_name']}' saved.")
+            self.display_current_worksheet(worksheet_data)
+        except Exception as e:
+            self.message_text.append(f"Error saving worksheet: {e}")
 
     # -------------------------------------------------
     # OPEN CREATE NEW DESIGN LAYER DIALOG
@@ -2041,6 +2104,92 @@ class PointCloudViewer(QMainWindow):
         else:
             # Original save functionality for road/bridge
             self.message_text.append("Configuration saved!")
+
+
+# ======================================================================================================================================
+    def open_existing_worksheet(self):
+        dialog = ExistingWorksheetDialog(self)
+        if dialog.exec_() == QDialog.Accepted and dialog.selected_worksheet:
+            ws = dialog.selected_worksheet
+            project_name = ws.get("project_name")
+
+            self.display_current_worksheet(ws)
+            self.message_text.append(f"Opened worksheet: {ws['worksheet_name']}")
+
+            if project_name and project_name != "None":
+                # Find project and load point cloud files
+                if os.path.exists(self.PROJECT_FILE):
+                    try:
+                        with open(self.PROJECT_FILE, 'r', encoding='utf-8') as f:
+                            for line in f:
+                                line = line.strip()
+                                if line:
+                                    proj = json.loads(line)
+                                    if proj["project_name"] == project_name:
+                                        files = proj["pointcloud_files"]
+                                        if files:
+                                            self.message_text.append(f"Auto-loading point cloud from project '{project_name}'...")
+                                            self.load_point_cloud_files(files)
+                                        break
+                    except Exception as e:
+                        self.message_text.append(f"Error loading project files: {e}")
+
+    def load_point_cloud_files(self, file_list):
+        """Load multiple point cloud files (merge or first one)"""
+        if not file_list:
+            return
+        # For simplicity, load first file
+        first_file = file_list[0]
+        try:
+            self.point_cloud = o3d.io.read_point_cloud(first_file)
+            if self.point_cloud.is_empty():
+                self.message_text.append("Point cloud is empty!")
+                return
+
+            # Display in VTK
+            points = np.asarray(self.point_cloud.points)
+            colors = np.asarray(self.point_cloud.colors) if self.point_cloud.has_colors() else None
+
+            poly_data = vtk.vtkPolyData()
+            vtk_points = vtk.vtkPoints()
+            vertices = vtk.vtkCellArray()
+
+            for i, pt in enumerate(points):
+                vtk_points.InsertNextPoint(pt)
+                vertex = vtk.vtkVertex()
+                vertex.GetPointIds().SetId(0, i)
+                vertices.InsertNextCell(vertex)
+
+            poly_data.SetPoints(vtk_points)
+            poly_data.SetVerts(vertices)
+
+            if colors is not None:
+                vtk_colors = vtk.vtkUnsignedCharArray()
+                vtk_colors.SetNumberOfComponents(3)
+                vtk_colors.SetName("Colors")
+                for c in (colors * 255).astype(np.uint8):
+                    vtk_colors.InsertNextTuple(c)
+                poly_data.GetPointData().SetScalars(vtk_colors)
+
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputData(poly_data)
+
+            if self.point_cloud_actor:
+                self.renderer.RemoveActor(self.point_cloud_actor)
+
+            self.point_cloud_actor = vtk.vtkActor()
+            self.point_cloud_actor.SetMapper(mapper)
+            self.point_cloud_actor.GetProperty().SetPointSize(2)
+
+            self.renderer.AddActor(self.point_cloud_actor)
+            self.renderer.ResetCamera()
+            self.vtk_widget.GetRenderWindow().Render()
+
+            self.message_text.append(f"Loaded point cloud: {os.path.basename(first_file)}")
+        except Exception as e:
+            self.message_text.append(f"Failed to load point cloud: {e}")
+
+# ======================================================================================================================================
     
     def save_current_lines_state(self):
         """Save the current graph lines state when switching between modes"""
