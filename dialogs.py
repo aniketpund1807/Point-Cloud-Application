@@ -2,7 +2,7 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QGridLayout, QGroupBox, QCheckBox, 
     QTextEdit, QComboBox, QDoubleSpinBox, QRadioButton, QButtonGroup, QWidget, QFileDialog, QInputDialog, QMessageBox,
-    QScrollArea
+    QScrollArea, QMenu, QAction
 )
 from PyQt5.QtCore import Qt
 import os
@@ -880,16 +880,20 @@ class MaterialLineDialog(QDialog):
             'final_compressed': self.final_spin.value()
         }
     
-# ===========================================================================================================================
-# ** MEASUREMENT DIALOG **
-# ===========================================================================================================================
+# ==========================================================================================================================================
+#                                                    ** MEASUREMENT DIALOG **
+# ==========================================================================================================================================
+
 class MeasurementDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, show_presized=False):
         super().__init__(parent)
         self.setWindowTitle("Measurement Configuration")
-        # self.setGeometry(100, 130, 200, 200)
         self.setModal(True)
         self.setMinimumWidth(520)
+
+        # show_presized = True → we are in the “second” dialog after a vertical line is finished
+        self.show_presized = show_presized
+
         self.setStyleSheet("""
             QDialog {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -963,47 +967,46 @@ class MeasurementDialog(QDialog):
         layout.setSpacing(18)
 
         # Title
-        title = QLabel("Start New Measurement Session")
+        title = QLabel("Start New Measurement Session" if not show_presized else "Vertical Line Finished")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C; padding: 10px;")
         layout.addWidget(title)
 
-        # === Measurement Type ===
-        type_group = QGroupBox("Measurement Type")
-        type_layout = QVBoxLayout(type_group)
+        # ------------------------------------------------------------------
+        # LINE button with submenu (Vertical / Horizontal)
+        # ------------------------------------------------------------------
+        self.line_button = QPushButton("Line")
+        self.line_menu = QMenu(self)
+        self.vertical_action   = QAction("Vertical Line", self)
+        self.horizontal_action = QAction("Horizontal Line", self)
+        self.line_menu.addAction(self.vertical_action)
+        self.line_menu.addAction(self.horizontal_action)
+        self.line_button.setMenu(self.line_menu)
+        layout.addWidget(self.line_button)
 
-        self.radio_line = QRadioButton("Line Measurement")
-        self.radio_polygon = QRadioButton("Polygon / Area")
-        self.radio_stockpile = QRadioButton("Stockpile Volume (Polygon + Height)")
+        # ------------------------------------------------------------------
+        # PRESIZED button – visible only on the second dialog
+        # ------------------------------------------------------------------
+        self.presized_button = QPushButton("Presized")
+        self.presized_button.setVisible(self.show_presized)
+        layout.addWidget(self.presized_button)
 
-        self.radio_line.setChecked(True)
+        # ------------------------------------------------------------------
+        # Polygon & Stockpile buttons (unchanged)
+        # ------------------------------------------------------------------
+        self.polygon_button = QPushButton("Polygon")
+        layout.addWidget(self.polygon_button)
 
-        type_layout.addWidget(self.radio_line)
-        type_layout.addWidget(self.radio_polygon)
-        type_layout.addWidget(self.radio_stockpile)
-        layout.addWidget(type_group)
+        self.stockpile_polygon_button = QPushButton("Stockpile Polygon")
+        layout.addWidget(self.stockpile_polygon_button)
 
-        # === Line Options (only visible if Line selected) ===
-        self.line_options = QGroupBox("Line Options")
-        line_opt_layout = QVBoxLayout(self.line_options)
+        self.complete_polygon_button = QPushButton("Complete Polygon")
+        self.complete_polygon_button.setVisible(False)
+        layout.addWidget(self.complete_polygon_button)
 
-        self.radio_vertical = QRadioButton("Vertical Line (Height)")
-        self.radio_horizontal = QRadioButton("Horizontal Distance")
-        self.radio_general = QRadioButton("General Line (Slanted)")
-
-        self.radio_vertical.setChecked(True)
-
-        line_opt_layout.addWidget(self.radio_vertical)
-        line_opt_layout.addWidget(self.radio_horizontal)
-        line_opt_layout.addWidget(self.radio_general)
-        layout.addWidget(self.line_options)
-
-        # Connect radio buttons to show/hide line options
-        self.radio_line.toggled.connect(self.line_options.setVisible)
-        self.radio_polygon.toggled.connect(lambda checked: self.line_options.setVisible(False))
-        self.radio_stockpile.toggled.connect(lambda checked: self.line_options.setVisible(False))
-
-        # === Units ===
+        # ------------------------------------------------------------------
+        # Units
+        # ------------------------------------------------------------------
         units_group = QGroupBox("Units")
         units_layout = QHBoxLayout(units_group)
         units_layout.addWidget(QLabel("Display Units:"))
@@ -1013,19 +1016,15 @@ class MeasurementDialog(QDialog):
         units_layout.addWidget(self.units_combo)
         layout.addWidget(units_group)
 
-        # === Presized Option ===
-        self.presized_check = QCheckBox("Enable Presized (Create Orthogonal Line)")
-        self.presized_check.setToolTip("After drawing a line, click 'Presized' to create perfectly horizontal/vertical version")
-        layout.addWidget(self.presized_check)
-
-        # === Buttons ===
+        # ------------------------------------------------------------------
+        # Buttons (Start / Cancel)
+        # ------------------------------------------------------------------
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        start_btn = QPushButton("Start Measurement")
-        start_btn.setObjectName("startBtn")
-        start_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(start_btn)
+        self.start_btn = QPushButton("Start Measurement" if not show_presized else "Continue")
+        self.start_btn.setObjectName("startBtn")
+        btn_layout.addWidget(self.start_btn)
 
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName("cancelBtn")
@@ -1034,27 +1033,18 @@ class MeasurementDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
-    def get_config(self):
-        """Return full configuration dictionary"""
-        config = {
-            "measurement_type": "line",
-            "line_type": "vertical",
-            "units": self.units_combo.currentText().lower(),
-            "presized_enabled": self.presized_check.isChecked(),
-        }
-
-        if self.radio_polygon.isChecked():
-            config["measurement_type"] = "polygon"
-        elif self.radio_stockpile.isChecked():
-            config["measurement_type"] = "stockpile"
-
-        if self.radio_line.isChecked():
-            if self.radio_horizontal.isChecked():
-                config["line_type"] = "horizontal"
-            elif self.radio_general.isChecked():
-                config["line_type"] = "general"
-
-        return config
+    # ----------------------------------------------------------------------
+    # Helper – which action was chosen ?
+    # ----------------------------------------------------------------------
+    def get_selected_action(self):
+        """Returns a string that tells the caller what the user really wants"""
+        if self.vertical_action.isChecked():
+            return "vertical_line"
+        if self.horizontal_action.isChecked():
+            return "horizontal_line"
+        if self.presized_button.isVisible() and self.presized_button.isDown():
+            return "presized_vertical"
+        return None
     
 # ===========================================================================================================================
 # DESIGN NEW LAYER DIALOG – With Dynamic Dropdown Based on Road/Bridge Selection
@@ -1658,244 +1648,138 @@ class ConstructionNewDialog(QDialog):
             'base_lines_layer': self.base_lines_combo.currentText()
         }
     
-# # ===========================================================================================================================
-# # ** CREATE PROJECT DIALOG **
-# # ===========================================================================================================================
-# class CreateProjectDialog(QDialog):
-#     def __init__(self, parent=None):
-#         super().__init__(parent)
-#         self.setWindowTitle("Create New Project")
-#         self.setModal(True)
-#         self.setMinimumWidth(560)
-#         self.setStyleSheet("""
-#             QDialog {
-#                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-#                                             stop:0 #f0e6fa, stop:1 #e6e6fa);
-#                 border-radius: 18px;
-#             }
-#             QLabel {
-#                 color: #2d1b3d;
-#                 font-weight: 600;
-#                 font-size: 13px;
-#             }
-#             QLineEdit {
-#                 border: 2px solid #BA68C8;
-#                 border-radius: 8px;
-#                 padding: 8px;
-#                 background-color: white;
-#             }
-#             QLineEdit:focus {
-#                 border: 2px solid #8E24AA;
-#                 background-color: #F8E8FF;
-#             }
-#             QComboBox {
-#                 border: 2px solid #BA68C8;
-#                 border-radius: 8px;
-#                 padding: 8px;
-#                 background-color: white;
-#             }
-#             QComboBox:focus {
-#                 border: 2px solid #8E24AA;
-#                 background-color: #F8E8FF;
-#             }
-#             QPushButton {
-#                 border-radius: 20px;
-#                 padding: 11px;
-#                 font-weight: bold;
-#                 min-width: 100px;
-#                 border: none;
-#             }
-#             QPushButton#okBtn {
-#                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-#                                           stop:0 #AB47BC, stop:1 #8E24AA);
-#                 color: white;
-#             }
-#             QPushButton#okBtn:hover {
-#                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-#                                           stop:0 #9C27B0, stop:1 #7B1FA2);
-#             }
-#             QPushButton#cancelBtn {
-#                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-#                                           stop:0 #E1BEE7, stop:1 #CE93D8);
-#                 color: #333;
-#             }
-#             QPushButton#cancelBtn:hover {
-#                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-#                                           stop:0 #D1C4E9, stop:1 #BA68C8);
-#             }
-#         """)
-
-#         layout = QVBoxLayout(self)
-#         layout.setContentsMargins(25, 25, 25, 25)
-#         layout.setSpacing(18)
-
-#         # Title
-#         title = QLabel("Create New Project")
-#         title.setAlignment(Qt.AlignCenter)
-#         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C;")
-#         layout.addWidget(title)
-
-#         # Project Name
-#         layout.addWidget(QLabel("Project Name:"))
-#         self.name_edit = QLineEdit()
-#         self.name_edit.setPlaceholderText("Enter project name")
-#         layout.addWidget(self.name_edit)
-
-#         # Link 3D Files
-#         layout.addWidget(QLabel("Link 3D Point Cloud Files:"))
-#         file_layout = QHBoxLayout()
-#         self.file_label = QLabel("No files selected")
-#         self.file_label.setStyleSheet("color: #555; font-style: italic;")
-#         file_layout.addWidget(self.file_label)
-#         browse_btn = QPushButton("Browse...")
-#         browse_btn.clicked.connect(self.browse_files)
-#         file_layout.addWidget(browse_btn)
-#         layout.addLayout(file_layout)
-
-#         self.selected_files = []  # stores list of file paths
-
-#         # Project Properties dropdown
-#         layout.addWidget(QLabel("Project Properties:"))
-#         self.properties_combo = QComboBox()
-#         self.properties_combo.addItems(["Design", "Construction", "Measurement", "Other"])
-#         layout.addWidget(self.properties_combo)
-
-#         # Buttons
-#         btn_layout = QHBoxLayout()
-#         btn_layout.addStretch()
-#         ok_btn = QPushButton("OK")
-#         ok_btn.setObjectName("okBtn")
-#         ok_btn.clicked.connect(self.accept)
-#         btn_layout.addWidget(ok_btn)
-#         cancel_btn = QPushButton("Cancel")
-#         cancel_btn.setObjectName("cancelBtn")
-#         cancel_btn.clicked.connect(self.reject)
-#         btn_layout.addWidget(cancel_btn)
-#         layout.addLayout(btn_layout)
-
-#     def browse_files(self):
-#         files, _ = QFileDialog.getOpenFileNames(
-#             self,
-#             "Select 3D Point Cloud Files",
-#             "",
-#             "Point Cloud Files (*.las *.laz *.ply *.pts *.xyz);;All Files (*)"
-#         )
-#         if files:
-#             self.selected_files = files
-#             if len(files) > 5:
-#                 display_text = f"{len(files)} files selected"
-#             else:
-#                 display_text = ", ".join([os.path.basename(f) for f in files])
-#             self.file_label.setText(display_text)
-#             self.file_label.setStyleSheet("color: #000; font-style: normal;")
-
-#     def get_data(self):
-#         """Return all entered data"""
-#         return {
-#             "project_name": self.name_edit.text().strip(),
-#             "pointcloud_files": self.selected_files.copy(),
-#             "properties": self.properties_combo.currentText()
-#         }
-
 
 # ===========================================================================================================================
 # ** CREATE PROJECT DIALOG - IMPROVED VERSION (Supports File + Folder Selection) **
 # ===========================================================================================================================
+import os
+from PyQt5.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QComboBox, QTextEdit, QPushButton, QFileDialog,
+    QMessageBox, QGroupBox
+)
+from PyQt5.QtCore import Qt
+
+
 class CreateProjectDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Create New Project")
+        self.setFixedWidth(500)
+        #self.setFixedSize(600, 600)
         self.setModal(True)
-        self.setMinimumWidth(600)
+
+        # EXACT STYLE MATCHING YOUR IMAGE
         self.setStyleSheet("""
             QDialog {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                            stop:0 #f5e8ff, stop:1 #e6d9ff);
-                border-radius:border-radius: 18px;
+                                            stop:0 #E8DAF8, stop:1 #D7B8F3);
+                border: 1px solid #BB86FC;
+                border-radius: 12px;
             }
             QLabel {
-                color: #2d1b3d;
+                color: #4A148C;
+                font-size: 14px;
                 font-weight: 600;
+                background: transparent;
+            }
+            QLabel[accessibleName="title"] {
+                font-size: 20px;
+                font-weight: bold;
+                color: #4A148C;
+                margin: 10px;
+            }
+            QLineEdit, QComboBox {
+                padding: 10px;
+                border: 2px solid #CF9FFF;
+                border-radius: 10px;
+                background-color: white;
+                font-size: 14px;
+                color: #333;
+            }
+            QLineEdit:focus, QComboBox:focus {
+                border: 2px solid #9C27B0;
+            }
+            QComboBox::drop-down {
+                border: 0px;
+                width: 30px;
+            }
+            QComboBox::down-arrow {
+                image: url(down_arrow.png);  /* optional: add a purple arrow icon */
+                width: 12px;
+                height: 12px;
+            }
+            QTextEdit {
+                padding: 12px;
+                border: 2px solid #CF9FFF;
+                border-radius: 10px;
+                background-color: white;
                 font-size: 13px;
-            }
-            QLineEdit, QTextEdit {
-                border: 2px solid #BA68C8;
-                border-radius: 8px;
-                padding: 8px;
-                background-color: white;
-                font-size: 12px;
-            }
-            QLineEdit:focus, QTextEdit:focus {
-                border: 2px solid #8E24AA;
-                background-color: #F8E8FF;
-            }
-            QComboBox {
-                border: 2px solid #BA68C8;
-                border-radius: 8px;
-                padding: 8px;
-                background-color: white;
+                color: #555;
             }
             QPushButton {
-                border-radius: 12px;
-                padding: 10px 16px;
+                padding: 12px 20px;
+                border-radius: 10px;
+                font-size: 14px;
                 font-weight: bold;
                 min-width: 100px;
-                border: none;
             }
             QPushButton#okBtn {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                                           stop:0 #AB47BC, stop:1 #8E24AA);
                 color: white;
+                border: none;
             }
             QPushButton#okBtn:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                                           stop:0 #9C27B0, stop:1: #7B1FA2);
             }
             QPushButton#cancelBtn {
-                background: #E0E0E0;
-                color: #333;
+                background-color: #E0C3FC;
+                color: #4A148C;
+                border: 2px solid #CF9FFF;
             }
             QPushButton#cancelBtn:hover {
-                background: #CCCCCC;
+                background-color: #D8B8F8;
             }
             QPushButton#browseFileBtn {
-                background-color: #42A5F5;
+                background-color: #7C4DFF;
                 color: white;
             }
             QPushButton#browseFileBtn:hover {
-                background-color: #1E88E5;
+                background-color: #651FFF;
             }
             QPushButton#browseFolderBtn {
-                background-color: #66BB6A;
+                background-color: #9C27B0;
                 color: white;
             }
             QPushButton#browseFolderBtn:hover {
-                background-color: #43A047;
+                background-color: #7B1FA2;
             }
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(5)
 
         # Title
         title = QLabel("Create New Project")
+        title.setAccessibleName("title")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #4A148C; margin-bottom: 10px;")
         layout.addWidget(title)
 
         # Project Name
         layout.addWidget(QLabel("Project Name:"))
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("e.g., Highway NH-44 Section A")
+        self.name_edit.setPlaceholderText("Enter project name")
         layout.addWidget(self.name_edit)
+
 
         # Point Cloud Files Section
         layout.addWidget(QLabel("Link 3D Point Cloud Data:"))
 
-        # Buttons: Choose File(s) or Folder
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(15)
+        btn_layout.setSpacing(12)
 
         self.browse_file_btn = QPushButton("Choose File(s)")
         self.browse_file_btn.setObjectName("browseFileBtn")
@@ -1910,32 +1794,25 @@ class CreateProjectDialog(QDialog):
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
-        # Display selected files/folders
+        # File Display
         self.files_display = QTextEdit()
         self.files_display.setReadOnly(True)
-        self.files_display.setFixedHeight(120)
+        self.files_display.setFixedHeight(140)
         self.files_display.setPlaceholderText("No files selected yet...")
-        self.files_display.setStyleSheet("""
-            QTextEdit { 
-                background-color: #f9f5ff; 
-                border: 2px dashed #BA68C8;
-                color: #444;
-            }
-        """)
         layout.addWidget(self.files_display)
 
-        # Counter label
+        # File counter
         self.file_count_label = QLabel("0 files selected")
-        self.file_count_label.setStyleSheet("color: #555; font-style: italic;")
+        self.file_count_label.setStyleSheet("color: #6A1B9A; font-style: italic;")
         layout.addWidget(self.file_count_label)
 
-        # Project Properties
+        # Project Category
         layout.addWidget(QLabel("Project Category:"))
-        self.properties_combo = QComboBox()
-        self.properties_combo.addItems(["Design", "Construction", "Measurement", "Survey", "Monitoring", "Other"])
-        layout.addWidget(self.properties_combo)
+        self.category_combo = QComboBox()
+        self.category_combo.addItems(["None", "Design", "Construction", "Measurement", "Other"])
+        layout.addWidget(self.category_combo)
 
-        # Buttons (OK / Cancel)
+        # OK / Cancel Buttons
         button_layout = QHBoxLayout()
         button_layout.addStretch()
 
@@ -1943,19 +1820,20 @@ class CreateProjectDialog(QDialog):
         cancel_btn.setObjectName("cancelBtn")
         cancel_btn.clicked.connect(self.reject)
 
-        ok_btn = QPushButton("Create Project")
+        ok_btn = QPushButton("OK")
         ok_btn.setObjectName("okBtn")
+        ok_btn.setDefault(True)
         ok_btn.clicked.connect(self.accept)
 
         button_layout.addWidget(cancel_btn)
         button_layout.addWidget(ok_btn)
+
         layout.addLayout(button_layout)
 
         # Store selected files
-        self.selected_files = []  # List of full file paths
+        self.selected_files = []
 
     def browse_files(self):
-        """Let user select one or more point cloud files"""
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Select Point Cloud Files",
@@ -1967,47 +1845,38 @@ class CreateProjectDialog(QDialog):
             self.update_file_display()
 
     def browse_folder(self):
-        """Let user select a folder - all supported files inside will be added"""
-        folder = QFileDialog.getExistingDirectory(
-            self,
-            "Select Folder Containing Point Cloud Files"
-        )
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder Containing Point Cloud Files")
         if folder:
             supported_exts = {'.las', '.laz', '.ply', '.pts', '.xyz', '.pcd', '.bin'}
-            found_files = []
-            for root, _, files_in_dir in os.walk(folder):
-                for f in files_in_dir:
+            found = []
+            for root, _, fs in os.walk(folder):
+                for f in fs:
                     if os.path.splitext(f)[1].lower() in supported_exts:
-                        found_files.append(os.path.join(root, f))
-
-            if not found_files:
-                QMessageBox.information(self, "No Files Found", 
-                    "No supported point cloud files found in the selected folder.")
+                        found.append(os.path.join(root, f))
+            if not found:
+                QMessageBox.information(self, "No Files", "No supported point cloud files found.")
                 return
-
-            self.selected_files = found_files
+            self.selected_files = found
             self.update_file_display()
 
     def update_file_display(self):
-        """Update the text display and counter with selected files"""
         count = len(self.selected_files)
         self.file_count_label.setText(f"{count} file{'s' if count != 1 else ''} selected")
 
         if count == 0:
             self.files_display.setPlainText("No files selected yet...")
-        elif count <= 10:
-            display_text = "\n".join([os.path.basename(f) for f in self.selected_files])
-            self.files_display.setPlainText(display_text)
+        elif count <= 12:
+            self.files_display.setPlainText("\n".join(os.path.basename(f) for f in self.selected_files))
         else:
-            sample = "\n".join([os.path.basename(f) for f in self.selected_files[:8]])
-            self.files_display.setPlainText(f"{sample}\n... and {count - 8} more files")
+            sample = "\n".join(os.path.basename(f) for f in self.selected_files[:10])
+            self.files_display.setPlainText(f"{sample}\n... and {count - 10} more files")
 
     def get_data(self):
-        """Return collected data when dialog is accepted"""
         return {
             "project_name": self.name_edit.text().strip(),
-            "pointcloud_files": self.selected_files.copy(),  # Return full paths
-            "properties": self.properties_combo.currentText(),
+            "project_type": self.type_combo.currentText(),
+            "pointcloud_files": self.selected_files.copy(),
+            "category": self.category_combo.currentText(),
             "file_count": len(self.selected_files)
         }
 

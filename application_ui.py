@@ -92,6 +92,9 @@ class ApplicationUI(QMainWindow):
         self.main_line_actor = None
         self.point_a_actor = None
         self.point_b_actor = None
+
+        self.current_vertical_points = []        # stores the two points of the current vertical line
+        self.is_presized_mode = False
         # Initialize actors for horizontal line measurement
         self.horizontal_line_actor = None
         self.point_p_actor = None

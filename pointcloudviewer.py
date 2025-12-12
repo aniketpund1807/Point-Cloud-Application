@@ -27,9 +27,9 @@ from application_ui import ApplicationUI
 from dialogs import (ConstructionConfigDialog, CurveDialog, ZeroLineDialog, MaterialLineDialog, MeasurementDialog,
                     DesignNewDialog, WorksheetNewDialog, HelpDialog, ConstructionNewDialog, CreateProjectDialog, ExistingWorksheetDialog)
 
-# ===========================================================================================================================
-# ** CLASS POINTCLOUDVIEWER **
-# ===========================================================================================================================
+# =============================================================================================================================================
+#                                                        ** CLASS POINTCLOUDVIEWER **
+# =============================================================================================================================================
 class PointCloudViewer(ApplicationUI):
     def __init__(self):
         super().__init__()
@@ -116,7 +116,8 @@ class PointCloudViewer(ApplicationUI):
                 
                 # Redraw the canvas
                 self.canvas.draw_idle()
-    
+
+    # =====================================================================================================================================
     def scroll_graph_with_slider(self, value):
         """Scroll the graph canvas based on slider position"""
         if not hasattr(self, 'graph_horizontal_scrollbar') or not self.graph_horizontal_scrollbar:
@@ -137,9 +138,8 @@ class PointCloudViewer(ApplicationUI):
             # Update the visual marker on the main graph
             self.update_main_graph_marker(value)
         
-    # -------------------------------------------------
+    # =======================================================================================================================================
     # HOVER HANDLER FOR POINTS
-    # -------------------------------------------------
     def on_hover(self, event):
         if event.inaxes != self.ax:
             self.annotation.set_visible(False)
@@ -177,13 +177,15 @@ class PointCloudViewer(ApplicationUI):
         elif vis:
             self.annotation.set_visible(False)
             self.canvas.draw_idle()
-
+    
+    # =======================================================================================================================================
     def set_measurement_type(self, mtype):
         """Helper to switch measurement type"""
         self.current_measurement = mtype
         self.measurement_points = []
         self.message_text.append(f"Switched to {mtype.replace('_', ' ').title()}")
 
+    # =======================================================================================================================================
     def reset_measurement_tools(self):
         """Clear all measurement buttons and states"""
         self.line_button.setVisible(False)
@@ -193,10 +195,8 @@ class PointCloudViewer(ApplicationUI):
         self.presized_button.setVisible(False)
         self.metrics_group.setVisible(False)
 
-# -------------------------------------------------------------------------------------------------------------------------
-    # ----------------------------------------------------------------------
+    # =======================================================================================================================================
     # Close dropdown when clicking outside
-    # ----------------------------------------------------------------------
     def eventFilter(self, obj, event):
         if event.type() == event.MouseButtonPress:
             if obj.isWidgetType() and obj.windowFlags() & Qt.Popup:
@@ -208,14 +208,14 @@ class PointCloudViewer(ApplicationUI):
                         btn.property("dropdown").hide()
         return super().eventFilter(obj, event)
     
-    # ----------------------------------------------------------------------
+    # =======================================================================================================================================
     # Helper called when user picks New / Existing (optional)
-    # ----------------------------------------------------------------------
     def on_dropdown_choice(self, main_btn, choice):
         main_btn.setChecked(False)
         main_btn.property("dropdown").hide()
-        print(f"{main_btn.text()} → {choice} selected")   # replace with real logic
-    
+        #print(f"{main_btn.text()} → {choice} selected")   # replace with real logic
+
+    # =======================================================================================================================================   
     def load_last_worksheet(self):
         """Load and display the most recently created worksheet on startup"""
         if not os.path.exists(self.WORKSHEET_FILE):
@@ -231,14 +231,14 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             print(f"Failed to load last worksheet: {e}")
 
-    # -------------------------------------------------
+    # =======================================================================================================================================
     # TOGGLE MESSAGE SECTION
-    # -------------------------------------------------
     def toggle_message_section(self):
         self.message_visible = not self.message_visible
         self.message_section.setVisible(self.message_visible)
         self.message_button.setText("Hide Message" if self.message_visible else "Message")
-    
+
+    # =======================================================================================================================================
     def toggle_worksheet_options(self):
         checked = self.worksheet_button.isChecked()
         self.sub_buttons_widget.setVisible(checked)
@@ -246,13 +246,15 @@ class PointCloudViewer(ApplicationUI):
         # Optional: change icon/text to indicate open/close state
         self.worksheet_button.setText("📊Worksheet ▼" if checked else "📊Worksheet")
 
+    # =======================================================================================================================================
     def toggle_design_options(self):
         checked = self.design_button.isChecked()
         self.sub_design_buttons_widget.setVisible(checked)
         
         # Optional: change icon/text to indicate open/close state
         self.design_button.setText("📐Design ▼" if checked else "📐Design")
-    
+
+    # =======================================================================================================================================   
     def toggle_construction_options(self):
         checked = self.construction_button.isChecked()
         self.sub_construction_buttons_widget.setVisible(checked)
@@ -260,6 +262,7 @@ class PointCloudViewer(ApplicationUI):
         # Optional: change icon/text to indicate open/close state
         self.construction_button.setText("🏗 Construction ▼" if checked else "🏗 Construction")
 
+    # =======================================================================================================================================
     def toggle_measurement_options(self):
         checked = self.measurement_button.isChecked()
         self.sub_measurement_buttons_widget.setVisible(checked)
@@ -267,43 +270,7 @@ class PointCloudViewer(ApplicationUI):
         # Optional: change icon/text to indicate open/close state
         self.measurement_button.setText("📏Measurement ▼" if checked else "📏Measurement")
 
-    # def open_create_project_dialog(self):
-    #     dialog = CreateProjectDialog(self)
-    #     if dialog.exec_() == QDialog.Accepted:
-    #         data = dialog.get_data()
-    #         project_name = data["project_name"].strip()
-    #         pointcloud_files = data["pointcloud_files"]
-    #         properties = data["properties"]
-
-    #         if not project_name:
-    #             QMessageBox.warning(self, "Error", "Project name is required!")
-    #             return
-
-    #         if not pointcloud_files:
-    #             QMessageBox.warning(self, "Error", "At least one point cloud file must be selected!")
-    #             return
-
-    #         # Prepare project entry
-    #         project_entry = {
-    #             "project_name": project_name,
-    #             "pointcloud_files": pointcloud_files,
-    #             "properties": properties,
-    #             "created_at": datetime.now().isoformat()
-    #         }
-
-    #         # Save to project_config.txt (append as JSON line)
-    #         try:
-    #             with open(self.PROJECT_FILE, 'a', encoding='utf-8') as f:
-    #                 json.dump(project_entry, f)
-    #                 f.write('\n')
-    #             self.message_text.append(f"Project '{project_name}' created successfully with {len(pointcloud_files)} file(s).")
-    #         except Exception as e:
-    #             QMessageBox.critical(self, "Error", f"Failed to save project: {str(e)}")
-    #             return
-
-    #         # Optional: Refresh any project lists if needed
-    #         QMessageBox.information(self, "Success", f"Project '{project_name}' has been created!")
-
+    # =======================================================================================================================================
     def open_create_project_dialog(self):
         dialog = CreateProjectDialog(self)
         if dialog.exec_() == QDialog.Accepted:
@@ -337,6 +304,7 @@ class PointCloudViewer(ApplicationUI):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save project:\n{str(e)}")
 
+    # =======================================================================================================================================
     def open_new_worksheet_dialog(self):
         """Open the New Worksheet dialog"""
         dialog = WorksheetNewDialog(self)
@@ -380,6 +348,7 @@ class PointCloudViewer(ApplicationUI):
                 QMessageBox.critical(self, "Save Error", f"Failed to save worksheet:\n{str(e)}")
                 self.message_text.append(f"Error saving worksheet: {str(e)}")
 
+    # =======================================================================================================================================
     def display_current_worksheet(self, data):
         """Display the current worksheet details in the left panel"""
         info = f"""
@@ -393,9 +362,8 @@ class PointCloudViewer(ApplicationUI):
         self.worksheet_display.setVisible(True)  # Changed from ApplicationUI.worksheet_display
         self.worksheet_display.setTitle(f"Active: {data['worksheet_name']}")
 
-    # -------------------------------------------------
+    # =======================================================================================================================================
     # OPEN CREATE NEW DESIGN LAYER DIALOG
-    # -------------------------------------------------
     def open_create_new_design_layer_dialog(self):
         """Open the Design New Layer dialog and configure UI based on selection (2D or 3D)"""
         dialog = DesignNewDialog(self)
@@ -466,6 +434,7 @@ class PointCloudViewer(ApplicationUI):
             # Optional: Bring bottom section into view
             QTimer.singleShot(100, lambda: self.bottom_section.raise_())
 
+    # =======================================================================================================================================
     def open_measurement_dialog(self):
         """Open the Measurement Configuration Dialog when New is clicked"""
         dialog = MeasurementDialog(self)
@@ -512,7 +481,7 @@ class PointCloudViewer(ApplicationUI):
             if config["presized_enabled"]:
                 self.presized_button.clicked.connect(self.handle_presized_button)
 
-    # ======================================================================
+    # =======================================================================================================================================
     def open_construction_layer_dialog(self):
         """Open the Construction Layer creation dialog"""
         dialog = ConstructionNewDialog(self)
