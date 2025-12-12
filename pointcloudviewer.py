@@ -28,7 +28,7 @@ from vtkmodules.vtkRenderingCore import (vtkActor, vtkPolyDataMapper, vtkRendere
 from vtkmodules.vtkCommonColor import vtkNamedColors
 
 from dialogs import (ConstructionConfigDialog, CurveDialog, ZeroLineDialog, MaterialLineDialog, MeasurementDialog,
-                    DesignNewDialog, WorksheetNewDialog, HelpDialog, CreateProjectDialog, ExistingWorksheetDialog)
+                    DesignNewDialog, WorksheetNewDialog, HelpDialog, CreateProjectDialog, ExistingWorksheetDialog, ConstructionNewDialog)
 from utils import find_best_fitting_plane
 from math import sqrt, acos, degrees, pi, atan2
 
@@ -1322,20 +1322,20 @@ class PointCloudViewer(QMainWindow):
     # ----------------------------------------------------------------------
     # Your existing slots (keep them unchanged)
     # ----------------------------------------------------------------------
-    def open_new_worksheet_dialog(self):
-        print("Open New Worksheet dialog")
+    # def open_new_worksheet_dialog(self):
+    #     print("Open New Worksheet dialog")
 
-    def open_create_new_design_layer_dialog(self):
-        print("Open New Design Layer dialog")
+    # def open_create_new_design_layer_dialog(self):
+    #     print("Open New Design Layer dialog")
 
-    def open_material_line_dialog(self):
-        print("Open Material Line dialog")
+    # def open_material_line_dialog(self):
+    #     print("Open Material Line dialog")
 
-    def open_measurement_dialog(self):
-        print("Open Measurement dialog")
+    # def open_measurement_dialog(self):
+    #     print("Open Measurement dialog")
 
-    def load_point_cloud(self):
-        print("Load point cloud")
+    # def load_point_cloud(self):
+    #     print("Load point cloud")
 
     def load_last_worksheet(self):
         """Load and display the most recently created worksheet on startup"""
@@ -1758,46 +1758,82 @@ class PointCloudViewer(QMainWindow):
         self.metrics_group.setVisible(False)
 
 
-
 # # ======================================================================
     def open_construction_layer_dialog(self):
         """Open the Construction Layer creation dialog"""
-        dialog = ConstructionConfigDialog(self)  # This uses the dialog you already have
+        dialog = ConstructionNewDialog(self)
         if dialog.exec_() == QDialog.Accepted:
-            config = dialog.get_data()
-            layer_name = config['layer_name']
-            if not layer_name.strip():
-                QMessageBox.warning(self, "Invalid Name", "Please enter a valid layer name.")
+            data = dialog.get_data()
+
+            layer_name      = data['layer_name']
+            is_road           = data['is_road']
+            is_bridge         = data['is_bridge']
+            reference_layer   = data['reference_layer']
+            base_lines_layer  = data['base_lines_layer']
+
+            if not layer_name:
+                QMessageBox.warning(self, "Missing name", "Please enter a layer name")
                 return
 
-            # Successfully created construction layer
-            self.construction_layer_created = True
+            # ------------------------------------------------------------------
+            # 1. Store the mode (road or bridge) – needed later for many things
+            # ------------------------------------------------------------------
+            self.current_mode = "road" if is_road else "bridge"
 
-            # Show the Add Material Line and Save buttons
-            self.add_material_line_button.setVisible(True)
-            self.save_button.setVisible(True)
-
-            # Also show bottom section if not already visible
+            # ------------------------------------------------------------------
+            # 2. Show the bottom section (the whole lower panel with the graph)
+            # ------------------------------------------------------------------
             self.bottom_section.setVisible(True)
 
-            # Optional: Show relevant checkboxes based on Road/Bridge
-            if config['is_road']:
-                self.current_mode = 'road'
-                self.surface_container.setVisible(True)
-                self.construction_container.setVisible(True)
-                self.road_surface_container.setVisible(True)
-                self.zero_container.setVisible(True)
-            elif config['is_bridge']:
-                self.current_mode = 'bridge'
-                self.deck_line_container.setVisible(True)
-                self.projection_container.setVisible(True)
-                self.construction_dots_container.setVisible(True)
-                self.bridge_zero_container.setVisible(True)
+            # ------------------------------------------------------------------
+            # 3. Clean the line-section – keep ONLY "Add Material Line" and "Save"
+            # ------------------------------------------------------------------
+            # hide every checkbox container that exists
+            for container in [
+                self.zero_container,
+                self.surface_container,
+                self.construction_container,
+                self.road_surface_container,
+                self.bridge_zero_container,
+                self.projection_container,
+                self.construction_dots_container,
+                self.material_line_container,      # will be shown again later
+                self.deck_line_container,
+            ]:
+                if hasattr(self, container.objectName() if isinstance(container, str) else container.property("objectName") or ""):
+                    container.setVisible(False)
 
-            self.message_text.append(f"Construction layer '{layer_name}' created successfully.")
-            self.message_text.append(f"Type: {'Road' if config['is_road'] else 'Bridge'}")
-            self.message_text.append(f"Reference 2D Layer: {config['reference_layer']}")
-            self.message_text.append(f"Base Line: {config['base_lines_layer']}")
+            # hide the old buttons that belong to the normal drawing mode
+            self.preview_button.setVisible(False)
+            self.threed_map_button.setVisible(False)
+            self.save_button.setVisible(False)          # will be shown again in a moment
+
+            # ------------------------------------------------------------------
+            # 4. Show ONLY the two buttons that are required for a new construction layer
+            # ------------------------------------------------------------------
+            self.add_material_line_button.setVisible(True)   # “Add Material Line”
+            self.save_button.setVisible(True)                # “Save”
+
+            # (optional) give the user a nice message
+            self.message_text.append(
+                f"Construction layer “{layer_name}” ({'Road' if is_road else 'Bridge'}) created.\n"
+                f"Reference layer : {reference_layer}\n"
+                f"Base line       : {base_lines_layer}\n"
+                "You can now add material lines."
+            )
+
+            # ------------------------------------------------------------------
+            # 5. (Optional) store the information somewhere for later saving
+            # ------------------------------------------------------------------
+            self.construction_layer_info = {
+                "name"            : layer_name,
+                "type"            : "road" if is_road else "bridge",
+                "reference_layer" : reference_layer,
+                "base_line"       : base_lines_layer,
+                "material_lines"  : []          # will be filled when the user draws them
+            }
+            self.construction_layer_created = True
+
 
     # ======================================================================
     # OPEN MATERIAL LINE DIALOG WHEN "Construction → New" IS CLICKED
@@ -3770,7 +3806,7 @@ class PointCloudViewer(QMainWindow):
             # Directly convert to VTK format without intermediate steps
             self.update_progress(90, "Creating visualization...")
             self.display_point_cloud()
-            self.start_button.setEnabled(True)
+
             # Final update before hiding
             self.update_progress(100, "Loading complete!")
             QTimer.singleShot(100, self.hide_progress_bar)

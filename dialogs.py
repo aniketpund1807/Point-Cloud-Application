@@ -1555,7 +1555,7 @@ class HelpDialog(QDialog):
 # NEW DIALOG: Construction Layer Creation Dialog (as shown in your image)
 # ===========================================================================================================================
 
-class ConstructionConfigDialog(QDialog):
+class ConstructionNewDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Construction Layer")
@@ -1565,20 +1565,14 @@ class ConstructionConfigDialog(QDialog):
                 background-color: #F5F5F5;
                 font-family: Segoe UI;
             }
-            QLabel {
-                font-size: 13px;
-                color: #333;
-            }
+            QLabel { font-size: 13px; color: #333; }
             QLineEdit {
                 padding: 8px;
                 border: 2px solid #BBB;
                 border-radius: 6px;
                 font-size: 13px;
             }
-            QRadioButton {
-                font-size: 13px;
-                spacing: 8px;
-            }
+            QRadioButton { font-size: 13px; spacing: 8px; }
             QPushButton {
                 padding: 10px;
                 border-radius: 6px;
@@ -1598,130 +1592,75 @@ class ConstructionConfigDialog(QDialog):
         layout.addWidget(title)
 
         # Layer Name
-        Layer_name = QLabel("Layer Name:")
-        Layer_name.setStyleSheet("font-weight: bold;")
-        layout.addWidget(Layer_name)
+        layout.addWidget(QLabel("Layer Name:"))
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Enter layer name")
         layout.addWidget(self.name_edit)
 
-        # Type Selection: Road or Bridge
+        # Type Selection
         type_group = QGroupBox("Type")
         type_group.setStyleSheet("QGroupBox { font-weight: bold; }")
         type_layout = QHBoxLayout()
         self.road_radio = QRadioButton("Road")
         self.bridge_radio = QRadioButton("Bridge")
-        type_layout.addWidget(self.road_radio)
+        # self.road_radio.setChecked(True)    
+        type_layout.addWidget(self.road_radio)            
         type_layout.addWidget(self.bridge_radio)
         type_group.setLayout(type_layout)
         layout.addWidget(type_group)
 
-        # Reference Layer of 2D design Layer (BOLD)
-        ref_layer_label = QLabel("Reference Layer of 2D design Layer:")
-        ref_layer_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(ref_layer_label)
-
+        # Reference layer
+        layout.addWidget(QLabel("Reference Layer of 2D design Layer:"))
         self.ref_layer_combo = QComboBox()
         self.ref_layer_combo.setEditable(True)
         self.ref_layer_combo.addItems(["None", "Design_Layer_01", "Design_Layer_02", "Design_Layer_03"])
-        self.ref_layer_combo.setCurrentIndex(0)
         layout.addWidget(self.ref_layer_combo)
 
-        # 2D Layer refer to Base lines (BOLD)
-        base_lines_label = QLabel("2D Layer refer to Base lines :")
-        base_lines_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(base_lines_label)
-
+        # Base lines
+        layout.addWidget(QLabel("2D Layer refer to Base lines :"))
         self.base_lines_combo = QComboBox()
         self.base_lines_combo.setEditable(True)
         layout.addWidget(self.base_lines_combo)
 
-        # === DYNAMIC BASE LINES LOGIC ===
-        self.road_base_lines = [
-            "None", 
-            "Zero Line", 
-            "Surface Line", 
-            "Construction Line", 
-            "Road Surface Line"
-        ]
-        self.bridge_base_lines = [
-            "None", 
-            "Zero Line", 
-            "Projection Line", 
-            "Construction Dots", 
-            "Deck Line"
-        ]
-
-        # Set initial (Road) items
+        # ------------------------------------------------------------------
+        self.road_base_lines  = ["None", "Zero Line", "Surface Line", "Construction Line", "Road Surface Line"]
+        self.bridge_base_lines = ["None", "Zero Line", "Projection Line", "Construction Dots", "Deck Line"]
         self.update_base_lines()
 
-        # Connect radio buttons to update dropdown
         self.road_radio.toggled.connect(self.update_base_lines)
 
         # Buttons
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
         self.ok_button = QPushButton("OK")
-        self.ok_button.setStyleSheet("""
-            QPushButton {
-                background-color: #7B1FA2;
-                color: white;
-            }
-            QPushButton:hover {
-                background-color: #9C27B0;
-            }
-        """)
-
+        self.ok_button.setStyleSheet("background-color:#7B1FA2;color:white;")
         self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #B0BEC5;
-                color: #333;
-            }
-            QPushButton:hover {
-                background-color: #90A4AE;
-            }
-        """)
-
+        self.cancel_button.setStyleSheet("background-color:#B0BEC5;color:#333;")
         self.ok_button.clicked.connect(self.accept)
         self.cancel_button.clicked.connect(self.reject)
-
-        button_layout.addWidget(self.ok_button)
-        button_layout.addWidget(self.cancel_button)
-        layout.addLayout(button_layout)
+        btn_layout.addWidget(self.ok_button)
+        btn_layout.addWidget(self.cancel_button)
+        layout.addLayout(btn_layout)
 
     def update_base_lines(self):
-        """Update the Base Lines dropdown based on selected type (Road/Bridge)"""
-        current_text = self.base_lines_combo.currentText()  # Remember current selection
-
+        cur = self.base_lines_combo.currentText()
         self.base_lines_combo.clear()
-
-        if self.road_radio.isChecked():
-            items = self.road_base_lines
-        else:
-            items = self.bridge_base_lines
-
+        items = self.road_base_lines if self.road_radio.isChecked() else self.bridge_base_lines
         self.base_lines_combo.addItems(items)
+        idx = self.base_lines_combo.findText(cur)
+        self.base_lines_combo.setCurrentIndex(idx if idx != -1 else 0)
 
-        # Try to restore previous selection if it still exists
-        index = self.base_lines_combo.findText(current_text)
-        if index >= 0:
-            self.base_lines_combo.setCurrentIndex(index)
-        else:
-            self.base_lines_combo.setCurrentIndex(0)  # default to "None"
-
+    # ------------------------------------------------------------------
+    # This method is now used by open_construction_layer_dialog()
     def get_data(self):
-        """Return all entered data as dict"""
         return {
-            'layer_name': self.name_edit.text().strip(),
-            'is_road': self.road_radio.isChecked(),
-            'is_bridge': self.bridge_radio.isChecked(),
-            'reference_layer': self.ref_layer_combo.currentText().strip(),
-            'base_lines_layer': self.base_lines_combo.currentText().strip()
+            'layer_name'      : self.name_edit.text().strip(),
+            'is_road'         : self.road_radio.isChecked(),
+            'is_bridge'       : self.bridge_radio.isChecked(),
+            'reference_layer' : self.ref_layer_combo.currentText(),
+            'base_lines_layer': self.base_lines_combo.currentText()
         }
-
-
+    
 # ===========================================================================================================================
 # ** CREATE PROJECT DIALOG **
 # ===========================================================================================================================
@@ -1861,15 +1800,9 @@ class CreateProjectDialog(QDialog):
             "properties": self.properties_combo.currentText()
         }
     
-
-
-
 # ===========================================================================================================================
 # ** EXISTING WORKSHEET DIALOG - WITH CHECKBOXES FOR EASY SELECTION **
 # ===========================================================================================================================
-
-
-
 
 class ExistingWorksheetDialog(QDialog):
     def __init__(self, parent=None):
