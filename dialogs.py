@@ -10,6 +10,688 @@ import json
 
 from datetime import datetime
 
+
+# ===========================================================================================================================
+# ** CREATE PROJECT DIALOG **
+# ===========================================================================================================================
+class CreateProjectDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create New Project")
+        self.setModal(True)
+        self.setMinimumWidth(560)
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #f0e6fa, stop:1 #e6e6fa);
+                border-radius: 18px;
+            }
+            QLabel {
+                color: #2d1b3d;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QLineEdit {
+                border: 2px solid #BA68C8;
+                border-radius: 8px;
+                padding: 8px;
+                background-color: white;
+            }
+            QLineEdit:focus {
+                border: 2px solid #8E24AA;
+                background-color: #F8E8FF;
+            }
+            QComboBox {
+                border: 2px solid #BA68C8;
+                border-radius: 8px;
+                padding: 8px;
+                background-color: white;
+            }
+            QComboBox:focus {
+                border: 2px solid #8E24AA;
+                background-color: #F8E8FF;
+            }
+            QPushButton {
+                border-radius: 20px;
+                padding: 11px;
+                font-weight: bold;
+                min-width: 100px;
+                border: none;
+            }
+            QPushButton#okBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #AB47BC, stop:1 #8E24AA);
+                color: white;
+            }
+            QPushButton#okBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #9C27B0, stop:1 #7B1FA2);
+            }
+            QPushButton#cancelBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #E1BEE7, stop:1 #CE93D8);
+                color: #333;
+            }
+            QPushButton#cancelBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #D1C4E9, stop:1 #BA68C8);
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(18)
+
+        # Title
+        title = QLabel("Create New Project")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C;")
+        layout.addWidget(title)
+
+        # Project Name
+        layout.addWidget(QLabel("Project Name:"))
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Enter project name")
+        layout.addWidget(self.name_edit)
+
+        # Link 3D Files
+        layout.addWidget(QLabel("Link 3D Point Cloud Files:"))
+        file_layout = QHBoxLayout()
+        self.file_label = QLabel("No files selected")
+        self.file_label.setStyleSheet("color: #555; font-style: italic;")
+        file_layout.addWidget(self.file_label)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self.browse_files)
+        file_layout.addWidget(browse_btn)
+        layout.addLayout(file_layout)
+
+        self.selected_files = []  # stores list of file paths
+
+        # Project Properties dropdown
+        layout.addWidget(QLabel("Project Properties:"))
+        self.properties_combo = QComboBox()
+        self.properties_combo.addItems(["Design", "Construction", "Measurement", "Other"])
+        layout.addWidget(self.properties_combo)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        ok_btn = QPushButton("OK")
+        ok_btn.setObjectName("okBtn")
+        ok_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(ok_btn)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("cancelBtn")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+    def browse_files(self):
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select 3D Point Cloud Files",
+            "",
+            "Point Cloud Files (*.las *.laz *.ply *.pts *.xyz);;All Files (*)"
+        )
+        if files:
+            self.selected_files = files
+            if len(files) > 5:
+                display_text = f"{len(files)} files selected"
+            else:
+                display_text = ", ".join([os.path.basename(f) for f in files])
+            self.file_label.setText(display_text)
+            self.file_label.setStyleSheet("color: #000; font-style: normal;")
+
+    def get_data(self):
+        """Return all entered data"""
+        return {
+            "project_name": self.name_edit.text().strip(),
+            "pointcloud_files": self.selected_files.copy(),
+            "properties": self.properties_combo.currentText()
+        }
+    
+
+# ===========================================================================================================================
+# ** WORKSHEET NEW DIALOG **
+# ===========================================================================================================================
+class WorksheetNewDialog(QDialog):
+    """Dialog that matches exactly the hand-drawn worksheet you showed."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("New Worksheet")
+        self.setModal(True)
+        self.resize(480, 380)
+
+        # ------------------------------------------------------------------
+        # Beautiful style – matches the other dialogs you already use
+        # ------------------------------------------------------------------
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #f0e6fa, stop:1 #e6e6fa);
+                border-radius: 18px;
+            }
+            QLabel {
+                color: #2d1b3d;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QLineEdit, QComboBox {
+                border: 2px solid #BA68C8;
+                border-radius: 8px;
+                padding: 8px;
+                background-color: white;
+                font-size: 13px;
+            }
+            QLineEdit:focus, QComboBox:focus {
+                border: 2px solid #8E24AA;
+                background-color: #F8E8FF;
+            }
+            QComboBox::drop-down {
+                border: 0px;
+            }
+            QComboBox::down-arrow {
+                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM4RTI0QUEiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNyAxMGw1IDUgNS01Ii8+PC9zdmc+);
+                width: 16px;
+                height: 16px;
+            }
+            QGroupBox {
+                border: 2px solid #BA68C8;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 12px;
+                font-weight: bold;
+                color: #4A148C;
+                background-color: rgba(255, 255, 255, 0.7);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 8px 0 8px;
+            }
+            QRadioButton {
+                padding: 6px;
+                color: #2d1b3d;
+                font-weight: normal;
+            }
+            QRadioButton::indicator {
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                border: 2px solid #BA68C8;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #8E24AA;
+                border: 2px solid #8E24AA;
+            }
+            QPushButton {
+                border-radius: 20px;
+                padding: 11px;
+                font-weight: bold;
+                min-width: 110px;
+                border: none;
+            }
+            QPushButton#okBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #AB47BC, stop:1 #8E24AA);
+                color: white;
+            }
+            QPushButton#okBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #9C27B0, stop:1 #7B1FA2);
+            }
+            QPushButton#cancelBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #E1BEE7, stop:1 #CE93D8);
+                color: #333;
+            }
+            QPushButton#cancelBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #D1C4E9, stop:1 #BA68C8);
+            }
+        """)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(30, 30, 30, 30)
+        main_layout.setSpacing(20)
+
+        # ------------------------------------------------------------------
+        # Title
+        # ------------------------------------------------------------------
+        title = QLabel("Create New Worksheet")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 19px; font-weight: bold; color: #4A148C; padding: 8px;")
+        main_layout.addWidget(title)
+
+        # ------------------------------------------------------------------
+        # Form fields (exactly like the drawing)
+        # ------------------------------------------------------------------
+        form = QGridLayout()
+        form.setHorizontalSpacing(20)
+        form.setVerticalSpacing(18)
+
+        # Worksheet Name
+        form.addWidget(QLabel("Worksheet Name:"), 0, 0)
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Enter worksheet name")
+        form.addWidget(self.name_edit, 0, 1)
+
+        # Worksheet Type (dropdown)
+        form.addWidget(QLabel("Worksheet Type:"), 1, 0)
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(["None", "Design", "Construction", "Measurement"])
+        form.addWidget(self.type_combo, 1, 1)
+
+        # Project Name (dropdown) - populated from project_config.txt
+        form.addWidget(QLabel("Project Name:"), 2, 0)
+        self.project_combo = QComboBox()
+        self.project_combo.addItem("None")  # Default option
+
+        # Load projects from project_config.txt
+        if os.path.exists("project_config.txt"):
+            try:
+                with open("project_config.txt", 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            proj = json.loads(line)
+                            self.project_combo.addItem(proj["project_name"])
+            except Exception as e:
+                print(f"Error loading projects: {e}")
+
+        form.addWidget(self.project_combo, 2, 1)
+
+        # Worksheet Category (dropdown)
+        form.addWidget(QLabel("Worksheet Category:"), 3, 0)
+        self.category_combo = QComboBox()
+        self.category_combo.addItems(["None", "Road", "Bridge", "Other"])
+        form.addWidget(self.category_combo, 3, 1)
+
+        # === Layer Type (3D / 2D) ===
+        form.addWidget(QLabel("Layer Type:"), 4, 0)
+        dim_group = QWidget()
+        dim_layout = QHBoxLayout(dim_group)
+        dim_layout.setContentsMargins(0, 0, 0, 0)
+        self.radio_3d = QRadioButton("3D")
+        self.radio_2d = QRadioButton("2D")
+
+        dim_layout.addWidget(self.radio_3d)
+        dim_layout.addWidget(self.radio_2d)
+        dim_layout.addStretch()
+        form.addWidget(dim_group, 4, 1)
+
+        main_layout.addLayout(form)
+
+        # ------------------------------------------------------------------
+        # Buttons (OK / Cancel)
+        # ------------------------------------------------------------------
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        ok_btn = QPushButton("OK")
+        ok_btn.setObjectName("okBtn")
+        ok_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(ok_btn)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("cancelBtn")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        main_layout.addLayout(btn_layout)
+
+    # ----------------------------------------------------------------------
+    # Helper – return everything the main window needs
+    # ----------------------------------------------------------------------
+    def get_data(self):
+        layer_type = "3D" if self.radio_3d.isChecked() else "2D"
+        return {
+            "worksheet_name": self.name_edit.text().strip(),
+            "worksheet_type": self.type_combo.currentText(),
+            "project_name": self.project_combo.currentText() if self.project_combo.currentText() != "None" else "",
+            "worksheet_category": self.category_combo.currentText(),
+            "layer_type": layer_type
+        }
+
+
+# ===========================================================================================================================
+# DESIGN NEW LAYER DIALOG – With Dynamic Dropdown Based on Road/Bridge Selection
+# ===========================================================================================================================
+class DesignNewDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create New Design Layer")
+        # self.setGeometry(210, 130, 200, 200)
+        self.setModal(True)
+        self.setMinimumWidth(440)
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #f0e6fa, stop:1 #e6e6fa);
+                                            border-radius: 18px;
+            }
+            QLabel {
+                color: #2d1b3d;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QGroupBox {
+                border: 2px solid #9C27B0;
+                border-radius: 12px;
+                margin-top: 12px;
+                padding-top: 8px;
+                font-weight: bold;
+                color: #4A148C;
+                background-color: rgba(255, 255, 255, 0.4);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 4px 10px;
+                background-color: #E1BEE7;
+                border-radius: 6px;
+            }
+            QRadioButton, QCheckBox {
+                font-weight: 500;
+                spacing: 8px;
+                font-size: 13px;
+            }
+            QComboBox {
+                border: 2px solid #BA68C8;
+                border-radius: 8px;
+                padding: 8px;
+                background-color: white;
+                font-size: 13px;
+            }
+            QComboBox:focus {
+                border: 2px solid #8E24AA;
+                background-color: #F8E8FF;
+            }
+            QPushButton {
+                border-radius: 20px;
+                padding: 11px;
+                font-weight: bold;
+                min-width: 100px;
+                border: none;
+            }
+            QPushButton#okBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #AB47BC, stop:1 #8E24AA);
+                color: white;
+            }
+            QPushButton#okBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #9C27B0, stop:1 #7B1FA2);
+            }
+            QPushButton#cancelBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #E1BEE7, stop:1 #CE93D8);
+                color: #333;
+            }
+            QPushButton#cancelBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #D1C4E9, stop:1 #BA68C8);
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(18)
+
+        # Title
+        title = QLabel("Create New Design Layer")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C; padding: 10px;")
+        layout.addWidget(title)
+
+        # ------------------ Layer Name -----------------
+        layer_name = QLabel("Layer Name:")
+        layer_name.setStyleSheet("font-weight: bold;")
+        layout.addWidget(layer_name)
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Enter layer name")
+        layout.addWidget(self.name_edit)
+        
+        # === Layer Dimension (3D / 2D) ===
+        dim_group = QGroupBox("Layer Type")
+        dim_layout = QVBoxLayout(dim_group)
+        self.radio_3d = QRadioButton("3D")
+        self.radio_2d = QRadioButton("2D")
+        dim_layout.addWidget(self.radio_3d)
+        dim_layout.addWidget(self.radio_2d)
+        layout.addWidget(dim_group)
+
+        # === Road / Bridge Checkboxes (mutually exclusive) ===
+        self.cb_road = QCheckBox("Road")
+        self.cb_bridge = QCheckBox("Bridge")
+
+        # Make them mutually exclusive
+        def toggle_exclusive(checked_cb):
+            if checked_cb.isChecked():
+                other = self.cb_bridge if checked_cb == self.cb_road else self.cb_road
+                other.blockSignals(True)
+                other.setChecked(False)
+                other.blockSignals(False)
+            self.update_reference_dropdown()
+
+        self.cb_road.stateChanged.connect(lambda s: toggle_exclusive(self.cb_road) if s else self.update_reference_dropdown())
+        self.cb_bridge.stateChanged.connect(lambda s: toggle_exclusive(self.cb_bridge) if s else self.update_reference_dropdown())
+
+        layout.addWidget(self.cb_road)
+        layout.addWidget(self.cb_bridge)
+
+        # === Reference Layer Dropdown (Dynamic) ===
+        self.ref_layer_group = QGroupBox("Reference Layer")
+        ref_layer_layout = QVBoxLayout(self.ref_layer_group)
+
+        self.combo_reference = QComboBox()
+        self.combo_reference.setEnabled(False)          # disabled until everything is ready
+
+        ref_layer_layout.addWidget(QLabel("Select reference Layer 2D:"))
+        ref_layer_layout.addWidget(self.combo_reference)
+        layout.addWidget(self.ref_layer_group)
+
+        # Initially hidden because 2D is default
+        self.ref_layer_group.setVisible(False)
+
+        # Connect dimension change → show/hide + refresh dropdown
+        self.radio_3d.toggled.connect(self.on_dimension_changed)
+        self.radio_2d.toggled.connect(self.on_dimension_changed)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        ok_btn = QPushButton("OK")
+        ok_btn.setObjectName("okBtn")
+        ok_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(ok_btn)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("cancelBtn")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+
+    # ------------------------------------------------------------------
+    def on_dimension_changed(self, checked):
+        """Called whenever 3D or 2D radio button is toggled"""
+        if not checked:                     # the one that became unchecked → ignore
+            return
+        # Show reference section only for 3D
+        self.ref_layer_group.setVisible(self.radio_3d.isChecked())
+        self.update_reference_dropdown()
+
+    # ------------------------------------------------------------------
+    def update_reference_dropdown(self):
+        """Populate combo box only when 3D + Road/Bridge is selected"""
+        self.combo_reference.clear()
+        self.combo_reference.setEnabled(False)
+
+        # If we are in 2D → nothing to show (group is already hidden anyway)
+        if not self.radio_3d.isChecked():
+            return
+
+        if self.cb_road.isChecked():
+            items = ["Road_Layer_1", "Road_Layer_2", "Road_Layer_3"]
+            self.ref_layer_group.setTitle("Reference Layer - Road")
+        elif self.cb_bridge.isChecked():
+            items = ["Bridge_Layer_1", "Bridge_Layer_2", "Bridge_Layer_3"]
+            self.ref_layer_group.setTitle("Reference Layer - Bridge")
+        else:
+            # 3D selected but no Road/Bridge → just show the group with an empty combo
+            self.ref_layer_group.setTitle("Reference Layer")
+            self.combo_reference.setEnabled(False)
+            return
+
+        self.combo_reference.addItems(items)
+        self.combo_reference.setCurrentIndex(0)
+        self.combo_reference.setEnabled(True)
+
+    # ------------------------------------------------------------------
+    def get_configuration(self):
+        """Return final configuration — works correctly for both 2D and 3D"""
+        reference_type = None
+        reference_line = None
+
+        # Only try to get reference if 3D is selected
+        if self.radio_3d.isChecked():
+            if self.cb_road.isChecked():
+                reference_type = "Road"
+                reference_line = self.combo_reference.currentText()
+            elif self.cb_bridge.isChecked():
+                reference_type = "Bridge"
+                reference_line = self.combo_reference.currentText()
+
+        # But if 2D is selected, we still want to know if Road/Bridge was checked!
+        # So we check checkboxes directly:
+        if not reference_type:  # Not set from 3D
+            if self.cb_road.isChecked():
+                reference_type = "Road"
+                reference_line = None  # No dropdown in 2D
+            elif self.cb_bridge.isChecked():
+                reference_type = "Bridge"
+                reference_line = None
+
+        return {
+            "dimension": "3D" if self.radio_3d.isChecked() else "2D",
+            "reference_type": reference_type,
+            "reference_line": reference_line
+        }
+
+
+# ===========================================================================================================================
+# NEW DIALOG: Construction Layer Creation Dialog (as shown in your image)
+# ===========================================================================================================================
+
+class ConstructionNewDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Construction Layer")
+        self.setFixedSize(380, 500)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #F5F5F5;
+                font-family: Segoe UI;
+            }
+            QLabel { font-size: 13px; color: #333; }
+            QLineEdit {
+                padding: 8px;
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                font-size: 13px;
+            }
+            QRadioButton { font-size: 13px; spacing: 8px; }
+            QPushButton {
+                padding: 10px;
+                border-radius: 6px;
+                font-weight: bold;
+                min-width: 90px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Title
+        title = QLabel("Create New Construction Layer")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C;")
+        layout.addWidget(title)
+
+        # Layer Name
+        layout.addWidget(QLabel("Layer Name:"))
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Enter layer name")
+        layout.addWidget(self.name_edit)
+
+        # Type Selection
+        type_group = QGroupBox("Type")
+        type_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        type_layout = QHBoxLayout()
+        self.road_radio = QRadioButton("Road")
+        self.bridge_radio = QRadioButton("Bridge")
+        # self.road_radio.setChecked(True)    
+        type_layout.addWidget(self.road_radio)            
+        type_layout.addWidget(self.bridge_radio)
+        type_group.setLayout(type_layout)
+        layout.addWidget(type_group)
+
+        # Reference layer
+        layout.addWidget(QLabel("Reference Layer of 2D design Layer:"))
+        self.ref_layer_combo = QComboBox()
+        self.ref_layer_combo.setEditable(True)
+        self.ref_layer_combo.addItems(["None", "Design_Layer_01", "Design_Layer_02", "Design_Layer_03"])
+        layout.addWidget(self.ref_layer_combo)
+
+        # Base lines
+        layout.addWidget(QLabel("2D Layer refer to Base lines :"))
+        self.base_lines_combo = QComboBox()
+        self.base_lines_combo.setEditable(True)
+        layout.addWidget(self.base_lines_combo)
+
+        # ------------------------------------------------------------------
+        self.road_base_lines  = ["None", "Zero Line", "Surface Line", "Construction Line", "Road Surface Line"]
+        self.bridge_base_lines = ["None", "Zero Line", "Projection Line", "Construction Dots", "Deck Line"]
+        self.update_base_lines()
+
+        self.road_radio.toggled.connect(self.update_base_lines)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.ok_button = QPushButton("OK")
+        self.ok_button.setStyleSheet("background-color:#7B1FA2;color:white;")
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setStyleSheet("background-color:#B0BEC5;color:#333;")
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+        btn_layout.addWidget(self.ok_button)
+        btn_layout.addWidget(self.cancel_button)
+        layout.addLayout(btn_layout)
+
+    def update_base_lines(self):
+        cur = self.base_lines_combo.currentText()
+        self.base_lines_combo.clear()
+        items = self.road_base_lines if self.road_radio.isChecked() else self.bridge_base_lines
+        self.base_lines_combo.addItems(items)
+        idx = self.base_lines_combo.findText(cur)
+        self.base_lines_combo.setCurrentIndex(idx if idx != -1 else 0)
+
+    # ------------------------------------------------------------------
+    # This method is now used by open_construction_layer_dialog()
+    def get_data(self):
+        return {
+            'layer_name'      : self.name_edit.text().strip(),
+            'is_road'         : self.road_radio.isChecked(),
+            'is_bridge'       : self.bridge_radio.isChecked(),
+            'reference_layer' : self.ref_layer_combo.currentText(),
+            'base_lines_layer': self.base_lines_combo.currentText()
+        }
+    
+    
 # ===========================================================================================================================
 # ** ZERO LINE DIALOG **
 # ===========================================================================================================================
@@ -168,9 +850,9 @@ class ZeroLineDialog(QDialog):
             return p1, p2
         except ValueError:
             return None, None
-# ===========================================================================================================================
+# ==========================================================================================================================================
 # ** CURVE DIALOG **
-# ===========================================================================================================================
+# ==========================================================================================================================================
 class CurveDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -698,8 +1380,8 @@ class MaterialLineDialog(QDialog):
         layout.addWidget(ref_label)
         
         # Radio buttons section - only two buttons
-        self.from_another_radio = QRadioButton("From Another layer")
-        self.material_layer_radio = QRadioButton("Material layer")
+        self.from_another_radio = QRadioButton("Material Line referring from Baselines")
+        self.material_layer_radio = QRadioButton("Material Line referring from Material layer")
         
         # Set default selection to Material layer
         self.material_layer_radio.setChecked(True)
@@ -725,10 +1407,10 @@ class MaterialLineDialog(QDialog):
         
         # Select Reference layer (dropdown) - hidden by default
         self.ref_layer_layout = QHBoxLayout()
-        ref_layer_label = QLabel("Select Reference layer:")
+        ref_layer_label = QLabel("Select Reference Baseline:")
         ref_layer_label.setFixedWidth(150)
         self.ref_layer_combo = QComboBox()
-        self.ref_layer_combo.addItems(["", "Layer 1", "Layer 2", "Layer 3", "Layer 4", "Layer 5"])
+        self.ref_layer_combo.addItems(["None", "Layer 1", "Layer 2", "Layer 3", "Layer 4", "Layer 5"])
         self.ref_layer_layout.addWidget(ref_layer_label)
         self.ref_layer_layout.addWidget(self.ref_layer_combo, 1)
         
@@ -740,10 +1422,10 @@ class MaterialLineDialog(QDialog):
         
         # Select Reference line (dropdown) - visible by default
         self.ref_line_layout = QHBoxLayout()
-        ref_line_label = QLabel("Select Reference line:")
+        ref_line_label = QLabel("Select Reference Material line:")
         ref_line_label.setFixedWidth(150)
         self.ref_line_combo = QComboBox()
-        self.ref_line_combo.addItems(["", "Line 1", "Line 2", "Line 3", "Line 4", "Line 5"])
+        self.ref_line_combo.addItems(["None", "Line 1", "Line 2", "Line 3", "Line 4", "Line 5"])
         self.ref_line_layout.addWidget(ref_line_label)
         self.ref_line_layout.addWidget(self.ref_line_combo, 1)
         
@@ -1057,433 +1739,9 @@ class MeasurementDialog(QDialog):
         return config
     
 
-# ===========================================================================================================================
-# DESIGN NEW LAYER DIALOG – With Dynamic Dropdown Based on Road/Bridge Selection
-# ===========================================================================================================================
-class DesignNewDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Create New Design Layer")
-        # self.setGeometry(210, 130, 200, 200)
-        self.setModal(True)
-        self.setMinimumWidth(440)
-        self.setStyleSheet("""
-            QDialog {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                            stop:0 #f0e6fa, stop:1 #e6e6fa);
-                                            border-radius: 18px;
-            }
-            QLabel {
-                color: #2d1b3d;
-                font-weight: 600;
-                font-size: 13px;
-            }
-            QGroupBox {
-                border: 2px solid #9C27B0;
-                border-radius: 12px;
-                margin-top: 12px;
-                padding-top: 8px;
-                font-weight: bold;
-                color: #4A148C;
-                background-color: rgba(255, 255, 255, 0.4);
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 4px 10px;
-                background-color: #E1BEE7;
-                border-radius: 6px;
-            }
-            QRadioButton, QCheckBox {
-                font-weight: 500;
-                spacing: 8px;
-                font-size: 13px;
-            }
-            QComboBox {
-                border: 2px solid #BA68C8;
-                border-radius: 8px;
-                padding: 8px;
-                background-color: white;
-                font-size: 13px;
-            }
-            QComboBox:focus {
-                border: 2px solid #8E24AA;
-                background-color: #F8E8FF;
-            }
-            QPushButton {
-                border-radius: 20px;
-                padding: 11px;
-                font-weight: bold;
-                min-width: 100px;
-                border: none;
-            }
-            QPushButton#okBtn {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #AB47BC, stop:1 #8E24AA);
-                color: white;
-            }
-            QPushButton#okBtn:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #9C27B0, stop:1 #7B1FA2);
-            }
-            QPushButton#cancelBtn {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #E1BEE7, stop:1 #CE93D8);
-                color: #333;
-            }
-            QPushButton#cancelBtn:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #D1C4E9, stop:1 #BA68C8);
-            }
-        """)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(18)
-
-        # Title
-        title = QLabel("Create New Design Layer")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C; padding: 10px;")
-        layout.addWidget(title)
-
-        # ------------------ Layer Name -----------------
-        layer_name = QLabel("Layer Name:")
-        layer_name.setStyleSheet("font-weight: bold;")
-        layout.addWidget(layer_name)
-        self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("Enter layer name")
-        layout.addWidget(self.name_edit)
-        
-        # === Layer Dimension (3D / 2D) ===
-        dim_group = QGroupBox("Layer Type")
-        dim_layout = QVBoxLayout(dim_group)
-        self.radio_3d = QRadioButton("3D")
-        self.radio_2d = QRadioButton("2D")
-        dim_layout.addWidget(self.radio_3d)
-        dim_layout.addWidget(self.radio_2d)
-        layout.addWidget(dim_group)
-
-        # === Road / Bridge Checkboxes (mutually exclusive) ===
-        self.cb_road = QCheckBox("Road")
-        self.cb_bridge = QCheckBox("Bridge")
-
-        # Make them mutually exclusive
-        def toggle_exclusive(checked_cb):
-            if checked_cb.isChecked():
-                other = self.cb_bridge if checked_cb == self.cb_road else self.cb_road
-                other.blockSignals(True)
-                other.setChecked(False)
-                other.blockSignals(False)
-            self.update_reference_dropdown()
-
-        self.cb_road.stateChanged.connect(lambda s: toggle_exclusive(self.cb_road) if s else self.update_reference_dropdown())
-        self.cb_bridge.stateChanged.connect(lambda s: toggle_exclusive(self.cb_bridge) if s else self.update_reference_dropdown())
-
-        layout.addWidget(self.cb_road)
-        layout.addWidget(self.cb_bridge)
-
-        # === Reference Layer Dropdown (Dynamic) ===
-        self.ref_layer_group = QGroupBox("Reference Layer")
-        ref_layer_layout = QVBoxLayout(self.ref_layer_group)
-
-        self.combo_reference = QComboBox()
-        self.combo_reference.setEnabled(False)          # disabled until everything is ready
-
-        ref_layer_layout.addWidget(QLabel("Select reference Layer 2D:"))
-        ref_layer_layout.addWidget(self.combo_reference)
-        layout.addWidget(self.ref_layer_group)
-
-        # Initially hidden because 2D is default
-        self.ref_layer_group.setVisible(False)
-
-        # Connect dimension change → show/hide + refresh dropdown
-        self.radio_3d.toggled.connect(self.on_dimension_changed)
-        self.radio_2d.toggled.connect(self.on_dimension_changed)
-
-        # Buttons
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-
-        ok_btn = QPushButton("OK")
-        ok_btn.setObjectName("okBtn")
-        ok_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(ok_btn)
-
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setObjectName("cancelBtn")
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
-
-        layout.addLayout(btn_layout)
-
-    # ------------------------------------------------------------------
-    def on_dimension_changed(self, checked):
-        """Called whenever 3D or 2D radio button is toggled"""
-        if not checked:                     # the one that became unchecked → ignore
-            return
-        # Show reference section only for 3D
-        self.ref_layer_group.setVisible(self.radio_3d.isChecked())
-        self.update_reference_dropdown()
-
-    # ------------------------------------------------------------------
-    def update_reference_dropdown(self):
-        """Populate combo box only when 3D + Road/Bridge is selected"""
-        self.combo_reference.clear()
-        self.combo_reference.setEnabled(False)
-
-        # If we are in 2D → nothing to show (group is already hidden anyway)
-        if not self.radio_3d.isChecked():
-            return
-
-        if self.cb_road.isChecked():
-            items = ["Road_Layer_1", "Road_Layer_2", "Road_Layer_3"]
-            self.ref_layer_group.setTitle("Reference Layer - Road")
-        elif self.cb_bridge.isChecked():
-            items = ["Bridge_Layer_1", "Bridge_Layer_2", "Bridge_Layer_3"]
-            self.ref_layer_group.setTitle("Reference Layer - Bridge")
-        else:
-            # 3D selected but no Road/Bridge → just show the group with an empty combo
-            self.ref_layer_group.setTitle("Reference Layer")
-            self.combo_reference.setEnabled(False)
-            return
-
-        self.combo_reference.addItems(items)
-        self.combo_reference.setCurrentIndex(0)
-        self.combo_reference.setEnabled(True)
-
-    # ------------------------------------------------------------------
-    def get_configuration(self):
-        """Return final configuration — works correctly for both 2D and 3D"""
-        reference_type = None
-        reference_line = None
-
-        # Only try to get reference if 3D is selected
-        if self.radio_3d.isChecked():
-            if self.cb_road.isChecked():
-                reference_type = "Road"
-                reference_line = self.combo_reference.currentText()
-            elif self.cb_bridge.isChecked():
-                reference_type = "Bridge"
-                reference_line = self.combo_reference.currentText()
-
-        # But if 2D is selected, we still want to know if Road/Bridge was checked!
-        # So we check checkboxes directly:
-        if not reference_type:  # Not set from 3D
-            if self.cb_road.isChecked():
-                reference_type = "Road"
-                reference_line = None  # No dropdown in 2D
-            elif self.cb_bridge.isChecked():
-                reference_type = "Bridge"
-                reference_line = None
-
-        return {
-            "dimension": "3D" if self.radio_3d.isChecked() else "2D",
-            "reference_type": reference_type,
-            "reference_line": reference_line
-        }
     
-# ===========================================================================================================================
-# ** WORKSHEET NEW DIALOG **
-# ===========================================================================================================================
-class WorksheetNewDialog(QDialog):
-    """Dialog that matches exactly the hand-drawn worksheet you showed."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("New Worksheet")
-        self.setModal(True)
-        self.resize(480, 380)
 
-        # ------------------------------------------------------------------
-        # Beautiful style – matches the other dialogs you already use
-        # ------------------------------------------------------------------
-        self.setStyleSheet("""
-            QDialog {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                            stop:0 #f0e6fa, stop:1 #e6e6fa);
-                border-radius: 18px;
-            }
-            QLabel {
-                color: #2d1b3d;
-                font-weight: 600;
-                font-size: 13px;
-            }
-            QLineEdit, QComboBox {
-                border: 2px solid #BA68C8;
-                border-radius: 8px;
-                padding: 8px;
-                background-color: white;
-                font-size: 13px;
-            }
-            QLineEdit:focus, QComboBox:focus {
-                border: 2px solid #8E24AA;
-                background-color: #F8E8FF;
-            }
-            QComboBox::drop-down {
-                border: 0px;
-            }
-            QComboBox::down-arrow {
-                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM4RTI0QUEiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNyAxMGw1IDUgNS01Ii8+PC9zdmc+);
-                width: 16px;
-                height: 16px;
-            }
-            QGroupBox {
-                border: 2px solid #BA68C8;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                font-weight: bold;
-                color: #4A148C;
-                background-color: rgba(255, 255, 255, 0.7);
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 8px 0 8px;
-            }
-            QRadioButton {
-                padding: 6px;
-                color: #2d1b3d;
-                font-weight: normal;
-            }
-            QRadioButton::indicator {
-                width: 16px;
-                height: 16px;
-                border-radius: 8px;
-                border: 2px solid #BA68C8;
-            }
-            QRadioButton::indicator:checked {
-                background-color: #8E24AA;
-                border: 2px solid #8E24AA;
-            }
-            QPushButton {
-                border-radius: 20px;
-                padding: 11px;
-                font-weight: bold;
-                min-width: 110px;
-                border: none;
-            }
-            QPushButton#okBtn {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #AB47BC, stop:1 #8E24AA);
-                color: white;
-            }
-            QPushButton#okBtn:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #9C27B0, stop:1 #7B1FA2);
-            }
-            QPushButton#cancelBtn {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #E1BEE7, stop:1 #CE93D8);
-                color: #333;
-            }
-            QPushButton#cancelBtn:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #D1C4E9, stop:1 #BA68C8);
-            }
-        """)
-
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(30, 30, 30, 30)
-        main_layout.setSpacing(20)
-
-        # ------------------------------------------------------------------
-        # Title
-        # ------------------------------------------------------------------
-        title = QLabel("Create New Worksheet")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 19px; font-weight: bold; color: #4A148C; padding: 8px;")
-        main_layout.addWidget(title)
-
-        # ------------------------------------------------------------------
-        # Form fields (exactly like the drawing)
-        # ------------------------------------------------------------------
-        form = QGridLayout()
-        form.setHorizontalSpacing(20)
-        form.setVerticalSpacing(18)
-
-        # Worksheet Name
-        form.addWidget(QLabel("Worksheet Name:"), 0, 0)
-        self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("Enter worksheet name")
-        form.addWidget(self.name_edit, 0, 1)
-
-        # Worksheet Type (dropdown)
-        form.addWidget(QLabel("Worksheet Type:"), 1, 0)
-        self.type_combo = QComboBox()
-        self.type_combo.addItems(["None", "Design", "Construction", "Measurement"])
-        form.addWidget(self.type_combo, 1, 1)
-
-        # Project Name (dropdown) - populated from project_config.txt
-        form.addWidget(QLabel("Project Name:"), 2, 0)
-        self.project_combo = QComboBox()
-        self.project_combo.addItem("None")  # Default option
-
-        # Load projects from project_config.txt
-        if os.path.exists("project_config.txt"):
-            try:
-                with open("project_config.txt", 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            proj = json.loads(line)
-                            self.project_combo.addItem(proj["project_name"])
-            except Exception as e:
-                print(f"Error loading projects: {e}")
-
-        form.addWidget(self.project_combo, 2, 1)
-
-        # Worksheet Category (dropdown)
-        form.addWidget(QLabel("Worksheet Category:"), 3, 0)
-        self.category_combo = QComboBox()
-        self.category_combo.addItems(["None", "Road", "Bridge", "Other"])
-        form.addWidget(self.category_combo, 3, 1)
-
-        # === Layer Type (3D / 2D) ===
-        form.addWidget(QLabel("Layer Type:"), 4, 0)
-        dim_group = QWidget()
-        dim_layout = QHBoxLayout(dim_group)
-        dim_layout.setContentsMargins(0, 0, 0, 0)
-        self.radio_3d = QRadioButton("3D")
-        self.radio_2d = QRadioButton("2D")
-
-        dim_layout.addWidget(self.radio_3d)
-        dim_layout.addWidget(self.radio_2d)
-        dim_layout.addStretch()
-        form.addWidget(dim_group, 4, 1)
-
-        main_layout.addLayout(form)
-
-        # ------------------------------------------------------------------
-        # Buttons (OK / Cancel)
-        # ------------------------------------------------------------------
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-
-        ok_btn = QPushButton("OK")
-        ok_btn.setObjectName("okBtn")
-        ok_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(ok_btn)
-
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setObjectName("cancelBtn")
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
-
-        main_layout.addLayout(btn_layout)
-
-    # ----------------------------------------------------------------------
-    # Helper – return everything the main window needs
-    # ----------------------------------------------------------------------
-    def get_data(self):
-        layer_type = "3D" if self.radio_3d.isChecked() else "2D"
-        return {
-            "worksheet_name": self.name_edit.text().strip(),
-            "worksheet_type": self.type_combo.currentText(),
-            "project_name": self.project_combo.currentText() if self.project_combo.currentText() != "None" else "",
-            "worksheet_category": self.category_combo.currentText(),
-            "layer_type": layer_type
-        }
 
 # ===========================================================================================================================
 #                                                ** HELP Dialog Box **
@@ -1551,254 +1809,9 @@ class HelpDialog(QDialog):
         layout.addLayout(button_layout)
 
 
-# ===========================================================================================================================
-# NEW DIALOG: Construction Layer Creation Dialog (as shown in your image)
-# ===========================================================================================================================
 
-class ConstructionNewDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Construction Layer")
-        self.setFixedSize(380, 500)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #F5F5F5;
-                font-family: Segoe UI;
-            }
-            QLabel { font-size: 13px; color: #333; }
-            QLineEdit {
-                padding: 8px;
-                border: 2px solid #BBB;
-                border-radius: 6px;
-                font-size: 13px;
-            }
-            QRadioButton { font-size: 13px; spacing: 8px; }
-            QPushButton {
-                padding: 10px;
-                border-radius: 6px;
-                font-weight: bold;
-                min-width: 90px;
-            }
-        """)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-
-        # Title
-        title = QLabel("Create New Construction Layer")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C;")
-        layout.addWidget(title)
-
-        # Layer Name
-        layout.addWidget(QLabel("Layer Name:"))
-        self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("Enter layer name")
-        layout.addWidget(self.name_edit)
-
-        # Type Selection
-        type_group = QGroupBox("Type")
-        type_group.setStyleSheet("QGroupBox { font-weight: bold; }")
-        type_layout = QHBoxLayout()
-        self.road_radio = QRadioButton("Road")
-        self.bridge_radio = QRadioButton("Bridge")
-        # self.road_radio.setChecked(True)    
-        type_layout.addWidget(self.road_radio)            
-        type_layout.addWidget(self.bridge_radio)
-        type_group.setLayout(type_layout)
-        layout.addWidget(type_group)
-
-        # Reference layer
-        layout.addWidget(QLabel("Reference Layer of 2D design Layer:"))
-        self.ref_layer_combo = QComboBox()
-        self.ref_layer_combo.setEditable(True)
-        self.ref_layer_combo.addItems(["None", "Design_Layer_01", "Design_Layer_02", "Design_Layer_03"])
-        layout.addWidget(self.ref_layer_combo)
-
-        # Base lines
-        layout.addWidget(QLabel("2D Layer refer to Base lines :"))
-        self.base_lines_combo = QComboBox()
-        self.base_lines_combo.setEditable(True)
-        layout.addWidget(self.base_lines_combo)
-
-        # ------------------------------------------------------------------
-        self.road_base_lines  = ["None", "Zero Line", "Surface Line", "Construction Line", "Road Surface Line"]
-        self.bridge_base_lines = ["None", "Zero Line", "Projection Line", "Construction Dots", "Deck Line"]
-        self.update_base_lines()
-
-        self.road_radio.toggled.connect(self.update_base_lines)
-
-        # Buttons
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        self.ok_button = QPushButton("OK")
-        self.ok_button.setStyleSheet("background-color:#7B1FA2;color:white;")
-        self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.setStyleSheet("background-color:#B0BEC5;color:#333;")
-        self.ok_button.clicked.connect(self.accept)
-        self.cancel_button.clicked.connect(self.reject)
-        btn_layout.addWidget(self.ok_button)
-        btn_layout.addWidget(self.cancel_button)
-        layout.addLayout(btn_layout)
-
-    def update_base_lines(self):
-        cur = self.base_lines_combo.currentText()
-        self.base_lines_combo.clear()
-        items = self.road_base_lines if self.road_radio.isChecked() else self.bridge_base_lines
-        self.base_lines_combo.addItems(items)
-        idx = self.base_lines_combo.findText(cur)
-        self.base_lines_combo.setCurrentIndex(idx if idx != -1 else 0)
-
-    # ------------------------------------------------------------------
-    # This method is now used by open_construction_layer_dialog()
-    def get_data(self):
-        return {
-            'layer_name'      : self.name_edit.text().strip(),
-            'is_road'         : self.road_radio.isChecked(),
-            'is_bridge'       : self.bridge_radio.isChecked(),
-            'reference_layer' : self.ref_layer_combo.currentText(),
-            'base_lines_layer': self.base_lines_combo.currentText()
-        }
     
-# ===========================================================================================================================
-# ** CREATE PROJECT DIALOG **
-# ===========================================================================================================================
-class CreateProjectDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Create New Project")
-        self.setModal(True)
-        self.setMinimumWidth(560)
-        self.setStyleSheet("""
-            QDialog {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                            stop:0 #f0e6fa, stop:1 #e6e6fa);
-                border-radius: 18px;
-            }
-            QLabel {
-                color: #2d1b3d;
-                font-weight: 600;
-                font-size: 13px;
-            }
-            QLineEdit {
-                border: 2px solid #BA68C8;
-                border-radius: 8px;
-                padding: 8px;
-                background-color: white;
-            }
-            QLineEdit:focus {
-                border: 2px solid #8E24AA;
-                background-color: #F8E8FF;
-            }
-            QComboBox {
-                border: 2px solid #BA68C8;
-                border-radius: 8px;
-                padding: 8px;
-                background-color: white;
-            }
-            QComboBox:focus {
-                border: 2px solid #8E24AA;
-                background-color: #F8E8FF;
-            }
-            QPushButton {
-                border-radius: 20px;
-                padding: 11px;
-                font-weight: bold;
-                min-width: 100px;
-                border: none;
-            }
-            QPushButton#okBtn {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #AB47BC, stop:1 #8E24AA);
-                color: white;
-            }
-            QPushButton#okBtn:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #9C27B0, stop:1 #7B1FA2);
-            }
-            QPushButton#cancelBtn {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #E1BEE7, stop:1 #CE93D8);
-                color: #333;
-            }
-            QPushButton#cancelBtn:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #D1C4E9, stop:1 #BA68C8);
-            }
-        """)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(25, 25, 25, 25)
-        layout.setSpacing(18)
-
-        # Title
-        title = QLabel("Create New Project")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C;")
-        layout.addWidget(title)
-
-        # Project Name
-        layout.addWidget(QLabel("Project Name:"))
-        self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("Enter project name")
-        layout.addWidget(self.name_edit)
-
-        # Link 3D Files
-        layout.addWidget(QLabel("Link 3D Point Cloud Files:"))
-        file_layout = QHBoxLayout()
-        self.file_label = QLabel("No files selected")
-        self.file_label.setStyleSheet("color: #555; font-style: italic;")
-        file_layout.addWidget(self.file_label)
-        browse_btn = QPushButton("Browse...")
-        browse_btn.clicked.connect(self.browse_files)
-        file_layout.addWidget(browse_btn)
-        layout.addLayout(file_layout)
-
-        self.selected_files = []  # stores list of file paths
-
-        # Project Properties dropdown
-        layout.addWidget(QLabel("Project Properties:"))
-        self.properties_combo = QComboBox()
-        self.properties_combo.addItems(["Design", "Construction", "Measurement", "Other"])
-        layout.addWidget(self.properties_combo)
-
-        # Buttons
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        ok_btn = QPushButton("OK")
-        ok_btn.setObjectName("okBtn")
-        ok_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(ok_btn)
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setObjectName("cancelBtn")
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
-        layout.addLayout(btn_layout)
-
-    def browse_files(self):
-        files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Select 3D Point Cloud Files",
-            "",
-            "Point Cloud Files (*.las *.laz *.ply *.pts *.xyz);;All Files (*)"
-        )
-        if files:
-            self.selected_files = files
-            if len(files) > 5:
-                display_text = f"{len(files)} files selected"
-            else:
-                display_text = ", ".join([os.path.basename(f) for f in files])
-            self.file_label.setText(display_text)
-            self.file_label.setStyleSheet("color: #000; font-style: normal;")
-
-    def get_data(self):
-        """Return all entered data"""
-        return {
-            "project_name": self.name_edit.text().strip(),
-            "pointcloud_files": self.selected_files.copy(),
-            "properties": self.properties_combo.currentText()
-        }
     
 # ===========================================================================================================================
 # ** EXISTING WORKSHEET DIALOG - WITH CHECKBOXES FOR EASY SELECTION **
@@ -2004,3 +2017,8 @@ class ExistingWorksheetDialog(QDialog):
                 return
 
         QMessageBox.warning(self, "Error", "Could not retrieve selected worksheet.")
+
+
+# ==========================================================================================================================================
+#                                                ** END OF dialogs.py **
+# ===========================================================================================================================================
