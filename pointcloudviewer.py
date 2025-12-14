@@ -557,9 +557,8 @@ class PointCloudViewer(ApplicationUI):
             }
             self.construction_layer_created = True
 
-    # ======================================================================
+    # =======================================================================================================================================
     # OPEN MATERIAL LINE DIALOG WHEN "Construction → New" IS CLICKED
-    # ======================================================================
     def open_material_line_dialog(self):
         """Opens the Material Line Configuration Dialog"""
         dialog = MaterialLineDialog(parent=self)
@@ -581,7 +580,8 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(f"Final Thickness: {config['final_compressed']} mm")
         else:
             self.message_text.append("Material Line creation cancelled.")
-    
+
+    # =======================================================================================================================================    
     # Optional: allow editing later with pencil button
     def edit_material_line(self):
         if not hasattr(self, 'material_configs') or not self.material_configs:
@@ -592,6 +592,7 @@ class PointCloudViewer(ApplicationUI):
             self.material_configs[-1] = dialog.get_material_data()
             self.message_text.append("Material Line configuration updated.")
 
+    # =======================================================================================================================================
     # Update the show_material_section method:
     def show_material_section(self):
         """Show material line configuration section"""
@@ -675,6 +676,7 @@ class PointCloudViewer(ApplicationUI):
         if hasattr(self, 'material_items'):
             self.material_items = []
 
+    # =======================================================================================================================================
     # Update the add_material_item method:
     def add_material_line_dialog(self):
         """Open dialog to add/edit a material line"""
@@ -689,6 +691,7 @@ class PointCloudViewer(ApplicationUI):
             # Show message
             self.message_text.append(f"Material line added/updated: {material_data['name']}")
 
+    # =======================================================================================================================================
     def create_material_line_entry(self, material_data, edit_index=None):
         """Create or update a material line entry in the UI"""
         # Create container
@@ -792,6 +795,7 @@ class PointCloudViewer(ApplicationUI):
         if edit_index is None:
             self.message_text.append(f"Added material line: {material_data['name']}")
 
+    # =======================================================================================================================================
     def edit_material_line(self, material_data, container, label):
         """Edit an existing material line"""
         # Find the index of this material item
@@ -810,6 +814,7 @@ class PointCloudViewer(ApplicationUI):
                     self.message_text.append(f"Updated material line: {new_material_data['name']}")
                 break
 
+    # =======================================================================================================================================
     def hide_material_section(self):
         """Hide material section"""
         # Hide all material items
@@ -838,6 +843,7 @@ class PointCloudViewer(ApplicationUI):
         # Reset current mode
         self.current_mode = None
 
+    # =======================================================================================================================================
     def save_material_data(self):
         """Save all material line data"""
         if self.current_mode == 'material':
@@ -863,6 +869,7 @@ class PointCloudViewer(ApplicationUI):
             # Original save functionality for road/bridge
             self.message_text.append("Configuration saved!")
 
+    # =======================================================================================================================================
     def open_existing_worksheet(self):
         dialog = ExistingWorksheetDialog(self)
         if dialog.exec_() == QDialog.Accepted and dialog.selected_worksheet:
@@ -890,6 +897,7 @@ class PointCloudViewer(ApplicationUI):
                     except Exception as e:
                         self.message_text.append(f"Error loading project files: {e}")
 
+    # =======================================================================================================================================
     def load_point_cloud_files(self, file_list):
         """Load multiple point cloud files (merge or first one)"""
         if not file_list:
@@ -945,13 +953,13 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             self.message_text.append(f"Failed to load point cloud: {e}")
 
+    # =======================================================================================================================================
     def show_help_dialog(self):
         """Open the Help Dialog when Help button is clicked"""
         dialog = HelpDialog(self)
         dialog.exec_()  # Modal – blocks until closed
 
-# -------------------------------------------------------------------------------------------------------------------------
-
+    # =======================================================================================================================================
     def save_current_lines_state(self):
         """Save the current graph lines state when switching between modes"""
         if self.current_mode == 'road':
@@ -998,6 +1006,7 @@ class PointCloudViewer(ApplicationUI):
             }
             self.message_text.append("Bridge lines state saved")
 
+    # =======================================================================================================================================
     def restore_saved_lines_state(self, mode):
         """Restore saved graph lines for a specific mode"""
         if mode == 'road' and self.road_lines_data:
@@ -1057,6 +1066,7 @@ class PointCloudViewer(ApplicationUI):
         self.canvas.draw()
         self.figure.tight_layout()
 
+    # =======================================================================================================================================
     def clear_graph_for_switch(self):
         """Clear graph when switching between road and bridge modes"""
         # Clear current drawing session
@@ -1103,6 +1113,7 @@ class PointCloudViewer(ApplicationUI):
         
         self.message_text.append("Graph cleared for mode switch")
 
+    # =======================================================================================================================================
     def clear_graph_for_mode(self, mode):
         """Clear graph lines for specific mode only"""
         if mode == 'road':
@@ -1114,6 +1125,7 @@ class PointCloudViewer(ApplicationUI):
             for line_type in ['deck_line', 'projection_line', 'construction_dots']:
                 self.clear_line_type(line_type)
 
+    # =======================================================================================================================================
     def clear_line_type(self, line_type):
         """Clear a specific line type from the graph"""
         if line_type in self.line_types:
@@ -1158,20 +1170,12 @@ class PointCloudViewer(ApplicationUI):
                     except:
                         pass
         
-    # -------------------------------------------------
-    # ON CHECKBOX CHANGED
-    # -------------------------------------------------
+    # =======================================================================================================================================
+    # ON CHECKBOX CHANGED 
     def on_checkbox_changed(self, state, line_type):
         if state == Qt.Checked:
             if line_type == 'construction_dots':
                 # Check if bridge baseline is active
-                if self.bridge_baseline.text() != "Hide Bridge Baseline":
-                    QMessageBox.warning(self, "Bridge Baseline Required", 
-                                    "Please activate Bridge Baseline first to use Construction Dots.")
-                    self.construction_dots_line.setChecked(False)
-                    return
-                
-                # Don't finish previous line automatically - let user double-click to complete
                 self.active_line_type = line_type
                 
                 # Set up event listeners if not already set up
@@ -1222,9 +1226,7 @@ class PointCloudViewer(ApplicationUI):
                     self.message_text.append("Click two points on the point cloud to set zero line start and end.")
                     return
             
-            # For other line types (surface, construction, road_surface, deck_line, projection_line)
-            # Don't finish previous line - let user double-click to complete
-            
+
             # First, if there's an ongoing line of different type, finish it
             if self.active_line_type and self.active_line_type != line_type and self.current_points:
                 self.message_text.append(f"Finishing {self.active_line_type.replace('_', ' ').title()} before switching to {line_type.replace('_', ' ').title()}")
@@ -1302,9 +1304,8 @@ class PointCloudViewer(ApplicationUI):
                 self.canvas.draw()
                 self.figure.tight_layout()
 
-    # -------------------------------------------------
+    # =======================================================================================================================================
     # UPDATE CHAINAGE TICKS ON GRAPHS
-    # -------------------------------------------------
     def update_chainage_ticks(self):
         if not self.zero_line_set or self.zero_interval is None:
             return
@@ -1341,9 +1342,8 @@ class PointCloudViewer(ApplicationUI):
         self.canvas.draw()
         self.figure.tight_layout()
 
-    # -------------------------------------------------
+    # =======================================================================================================================================
     # UPDATE SCALE MARKER BASED ON SLIDER
-    # -------------------------------------------------
     def update_scale_marker(self):
         value = self.volume_slider.value()
         pos = value / 100.0 * self.total_distance
@@ -1392,9 +1392,8 @@ class PointCloudViewer(ApplicationUI):
         
         self.scale_canvas.draw()
 
-    # -------------------------------------------------
+    # =======================================================================================================================================
     # VOLUME CHANGED (UPDATE SCALE MARKER)
-    # -------------------------------------------------
     def volume_changed(self, value):
         print(f"Volume slider changed to: {value}%")
         if self.zero_line_set:
@@ -1404,6 +1403,7 @@ class PointCloudViewer(ApplicationUI):
         # Always scroll the graph regardless of zero line state
         self.scroll_graph_with_slider(value)
 
+    # =======================================================================================================================================
     def update_main_graph_marker(self, slider_value):
         """Update the main graph based on scale slider position"""
         if not self.zero_line_set:
@@ -1436,6 +1436,7 @@ class PointCloudViewer(ApplicationUI):
         # Ensure the canvas is redrawn
         self.canvas.draw_idle()
 
+    # =======================================================================================================================================
     def on_graph_scrolled(self):
         """Update slider position when graph is manually scrolled"""
         if not hasattr(self, 'graph_horizontal_scrollbar') or not self.volume_slider:
@@ -1460,6 +1461,7 @@ class PointCloudViewer(ApplicationUI):
                     self.update_scale_marker()
                     self.update_main_graph_marker(slider_value)
 
+    # =======================================================================================================================================
     def complete_line_with_double_click(self):
         """Complete the current line when double-clicked"""
         if self.active_line_type and len(self.current_points) > 1:
@@ -1467,12 +1469,14 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(f"{self.active_line_type.replace('_', ' ').title()} completed with double-click")
         elif self.active_line_type and len(self.current_points) == 1:
             self.message_text.append("Need at least 2 points to create a line. Add more points before double-clicking.")              
-    
+
+    # =======================================================================================================================================   
     def on_key_press(self, event):
         if event.key == 'escape' and self.active_line_type and self.current_points:
             self.finish_current_polyline()
             self.message_text.append(f"{self.active_line_type.replace('_', ' ').title()} completed with Escape key")
 
+    # =======================================================================================================================================
     # Add a helper method to format chainage labels:
     def get_chainage_label(self, position):
         """Format chainage label for a given position (for main graph marker)"""
@@ -1489,9 +1493,8 @@ class PointCloudViewer(ApplicationUI):
         # Format as KM+Interval (3 digits with leading zeros)
         return f"{self.zero_start_km}+{interval_value:03d}"
 
-    # -------------------------------------------------
+    # =======================================================================================================================================
     # UPDATE ZERO ACTORS
-    # -------------------------------------------------
     def update_zero_actors(self):
         if not self.zero_line_set:
             return
@@ -1539,6 +1542,7 @@ class PointCloudViewer(ApplicationUI):
         self.figure.tight_layout()
         self.vtk_widget.GetRenderWindow().Render()
 
+    # =======================================================================================================================================
     # In the update_scale_ticks method, improve the tick labels:
     def update_scale_ticks(self):
         """Update the scale section with KM+interval values"""
@@ -1605,10 +1609,9 @@ class PointCloudViewer(ApplicationUI):
         
         # Show the scale section
         self.scale_section.setVisible(True)
-    # -------------------------------------------------
-    # EDIT ZERO LINE
-    # -------------------------------------------------
 
+    # =======================================================================================================================================
+    # EDIT ZERO LINE
     def edit_zero_line(self):
         if not self.zero_line_set:
             return
@@ -1661,6 +1664,7 @@ class PointCloudViewer(ApplicationUI):
             except ValueError:
                 QMessageBox.warning(self, "Invalid Input", "Please enter valid numbers.")
 
+    # =======================================================================================================================================
     def edit_construction_dots_line(self):
         if not self.construction_dots_line.isChecked():
             return
@@ -1697,6 +1701,7 @@ class PointCloudViewer(ApplicationUI):
         #     self.message_text.append(f"Construction Dots Config: Spacing: {config['spacing']}, Size: {config['size']}")
             # Add further logic here if needed (e.g., apply construction dots settings)
 
+    # =======================================================================================================================================
     def edit_deck_line(self):
         if not self.deck_line.isChecked():
             return
@@ -1706,9 +1711,8 @@ class PointCloudViewer(ApplicationUI):
         #     self.message_text.append(f"Deck Line Config: Thickness: {config['thickness']}, Material: {config['material']}")
             # Add further logic here if needed (e.g., apply deck line settings)
 
-    # -------------------------------------------------
+    # =======================================================================================================================================
     # CURVE BUTTON HANDLER
-    # -------------------------------------------------
     def on_curve_button_clicked(self, event=None):
         """
         Handles:
