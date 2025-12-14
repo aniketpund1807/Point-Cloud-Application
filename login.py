@@ -24,6 +24,15 @@ class LoginDialog(QDialog):
         self.resize(850, 550)
         self.setMinimumSize(800, 450)
 
+        # Set unified gradient background for the entire dialog
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #2E1B47, stop:0.5 #5D3A9B, stop:1 #8A2BE2);
+                border-radius: 10px;
+            }
+        """)
+
         # Main layout
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -32,9 +41,10 @@ class LoginDialog(QDialog):
         # === LEFT SIDEBAR ===
         self.left_sidebar = QFrame()
         self.left_sidebar.setFixedWidth(400)
+        # Transparent background to show the dialog's gradient
         self.left_sidebar.setStyleSheet("""
             QFrame {
-                background-color: #2c3e50;
+                background: transparent;
                 border-top-left-radius: 10px;
                 border-bottom-left-radius: 10px;
             }
@@ -46,7 +56,14 @@ class LoginDialog(QDialog):
 
         # Welcome title
         title = QLabel("Welcome")
-        title.setStyleSheet("color: white; font-size: 36px; font-weight: bold;")
+        title.setStyleSheet("""
+            QLabel {
+                color: white; 
+                font-size: 36px; 
+                font-weight: bold;
+                background: transparent;
+            }
+        """)
         title.setAlignment(Qt.AlignCenter)
         sidebar_layout.addWidget(title, alignment=Qt.AlignCenter)
 
@@ -54,6 +71,7 @@ class LoginDialog(QDialog):
         self.logo_label = QLabel()
         self.logo_label.setAlignment(Qt.AlignCenter)
         self.logo_label.setFixedSize(180, 180)
+        self.logo_label.setStyleSheet("background: transparent;")
 
         # Use raw string for Windows path
         logo_path = r"C:\Users\hp\OneDrive\Documents\milogo\MI_logo.png"
@@ -67,7 +85,7 @@ class LoginDialog(QDialog):
             self.logo_label.setText("LOGO")
             self.logo_label.setStyleSheet("""
                 QLabel {
-                    color: #34495e;
+                    color: rgba(255, 255, 255, 0.8);
                     font-size: 28px;
                     font-weight: bold;
                     background-color: rgba(255, 255, 255, 0.1);
@@ -79,13 +97,25 @@ class LoginDialog(QDialog):
 
         # App name
         app_name = QLabel("Micro Integrated")
-        app_name.setStyleSheet("color: #ecf0f1; font-size: 24px;")
+        app_name.setStyleSheet("""
+            QLabel {
+                color: white; 
+                font-size: 24px;
+                background: transparent;
+            }
+        """)
         app_name.setAlignment(Qt.AlignCenter)
         sidebar_layout.addWidget(app_name, alignment=Qt.AlignCenter)
 
         # Subtitle
         subtitle = QLabel("3D Point Cloud")
-        subtitle.setStyleSheet("color: #bdc3c7; font-size: 20px;")
+        subtitle.setStyleSheet("""
+            QLabel {
+                color: rgba(255, 255, 255, 0.8);
+                font-size: 20px;
+                background: transparent;
+            }
+        """)
         subtitle.setAlignment(Qt.AlignCenter)
         sidebar_layout.addWidget(subtitle, alignment=Qt.AlignCenter)
 
@@ -95,35 +125,54 @@ class LoginDialog(QDialog):
 
         # === RIGHT CONTENT ===
         self.right_frame = QFrame()
+        # Transparent background to show the dialog's gradient
         self.right_frame.setStyleSheet("""
             QFrame {
-                background-color: white;
+                background: transparent;
                 border-top-right-radius: 10px;
                 border-bottom-right-radius: 10px;
             }
         """)
 
         right_layout = QVBoxLayout(self.right_frame)
-        right_layout.setContentsMargins(40, 40, 40, 40)
+        right_layout.setContentsMargins(20, 20, 20, 20)
 
-        # Tabs
+        # Tabs - Increased tab widths
         self.tabs = QTabWidget()
         self.tabs.setStyleSheet("""
-            QTabWidget::pane { border: none; }
-            QTabBar::tab {
-                padding: 10px 20px;
-                margin-right: 5px;
-                font-size: 14px;
+            QTabWidget {
+                background: transparent;
             }
-            QTabBar::tab:selected {
-                background: #3498db;
+            QTabWidget::pane { 
+                border: none; 
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
+            }
+            QTabBar {
+                spacing: 15px;
+            }
+            QTabBar::tab {
+                padding: 15px 15px;  /* Increased padding for wider tabs */
+                margin-right: 5px;
+                font-size: 13px;    /* Slightly larger font */
+                font : bold;
+                background: rgba(255, 255, 255, 0.2);
                 color: white;
                 border-top-left-radius: 8px;
                 border-top-right-radius: 8px;
+                min-width: 100px;   /* Minimum width for tabs */
+            }
+            QTabBar::tab:selected {
+                background: rgba(255, 255, 255, 0.3);
+                color: white;
+                font-weight: bold;
             }
             QTabBar::tab:!selected {
-                background: #ecf0f1;
-                color: #2c3e50;
+                background: rgba(255, 255, 255, 0.1);
+                color: rgba(255, 255, 255, 0.8);
+            }
+            QTabBar::tab:hover {
+                background: rgba(255, 255, 255, 0.25);
             }
         """)
         self.tabs.addTab(self.create_login_tab(), "Login")
@@ -140,25 +189,64 @@ class LoginDialog(QDialog):
 
     def create_login_tab(self):
         widget = QWidget()
+        # Set transparent background
+        widget.setStyleSheet("background: transparent;")
+        
         layout = QVBoxLayout(widget)
         layout.setSpacing(20)
         layout.setContentsMargins(20, 30, 20, 30)
 
-        layout.addWidget(QLabel("<h2>Login to Your Account</h2>"), alignment=Qt.AlignCenter)
+        title_label = QLabel("<h2 style='color: white;'>Login to Your Account</h2>")
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setStyleSheet("background: transparent;")
+        layout.addWidget(title_label)
 
+        # Username field
+        username_label = QLabel("Username:")
+        username_label.setStyleSheet("color: white; font-size: 14px; background: transparent;")
+        layout.addWidget(username_label)
+        
         self.login_username = QLineEdit()
         self.login_username.setPlaceholderText("Enter username")
-        self.login_username.setStyleSheet("font-size: 14px; padding: 10px;")
-        layout.addWidget(QLabel("Username:"))
+        self.login_username.setStyleSheet("""
+            QLineEdit {
+                font-size: 14px; 
+                padding: 10px;
+                background: rgba(255, 255, 255, 0.9);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                border-radius: 5px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+                background: white;
+            }
+        """)
         layout.addWidget(self.login_username)
 
+        # Password field
+        password_label = QLabel("Password:")
+        password_label.setStyleSheet("color: white; font-size: 14px; background: transparent;")
+        layout.addWidget(password_label)
+        
         self.login_password = QLineEdit()
         self.login_password.setPlaceholderText("Enter password")
         self.login_password.setEchoMode(QLineEdit.Password)
-        self.login_password.setStyleSheet("font-size: 14px; padding: 10px;")
-        layout.addWidget(QLabel("Password:"))
+        self.login_password.setStyleSheet("""
+            QLineEdit {
+                font-size: 14px; 
+                padding: 10px;
+                background: rgba(255, 255, 255, 0.9);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                border-radius: 5px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+                background: white;
+            }
+        """)
         layout.addWidget(self.login_password)
 
+        # Login button
         btn_layout = QHBoxLayout()
         login_btn = QPushButton("Login")
         login_btn.setStyleSheet("""
@@ -168,9 +256,13 @@ class LoginDialog(QDialog):
                 padding: 12px;
                 font-size: 16px;
                 border-radius: 6px;
+                border: none;
             }
             QPushButton:hover {
                 background-color: #2980b9;
+            }
+            QPushButton:pressed {
+                background-color: #1c6ea4;
             }
         """)
         login_btn.clicked.connect(self.do_login)
@@ -180,15 +272,17 @@ class LoginDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
+        # Register link
         self.register_link = QLabel(
-            '<a href="#" style="color: #3498db; text-decoration: none; font-size: 14px;">New here? <strong>Register</strong></a>'
+            '<a href="#" style="color: rgba(255, 255, 255, 0.9); text-decoration: none; font-size: 14px;">New here? <strong style="color: #3498db;">Register</strong></a>'
         )
         self.register_link.setAlignment(Qt.AlignCenter)
         self.register_link.setOpenExternalLinks(False)
         self.register_link.linkActivated.connect(self.switch_to_register_tab)
         self.register_link.setCursor(QCursor(Qt.PointingHandCursor))
-
+        self.register_link.setStyleSheet("background: transparent;")
         layout.addWidget(self.register_link)
+        
         layout.addStretch()
 
         return widget
@@ -198,32 +292,87 @@ class LoginDialog(QDialog):
 
     def create_register_tab(self):
         widget = QWidget()
+        # Set transparent background
+        widget.setStyleSheet("background: transparent;")
+        
         layout = QVBoxLayout(widget)
         layout.setSpacing(20)
         layout.setContentsMargins(20, 30, 20, 30)
 
-        layout.addWidget(QLabel("<h2>Create New Account</h2>"), alignment=Qt.AlignCenter)
+        title_label = QLabel("<h2 style='color: white;'>Create New Account</h2>")
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setStyleSheet("background: transparent;")
+        layout.addWidget(title_label)
 
+        # Username field
+        username_label = QLabel("Username:")
+        username_label.setStyleSheet("color: white; font-size: 14px; background: transparent;")
+        layout.addWidget(username_label)
+        
         self.reg_username = QLineEdit()
         self.reg_username.setPlaceholderText("Choose a username")
-        self.reg_username.setStyleSheet("font-size: 14px; padding: 10px;")
-        layout.addWidget(QLabel("Username:"))
+        self.reg_username.setStyleSheet("""
+            QLineEdit {
+                font-size: 14px; 
+                padding: 10px;
+                background: rgba(255, 255, 255, 0.9);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                border-radius: 5px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #27ae60;
+                background: white;
+            }
+        """)
         layout.addWidget(self.reg_username)
 
+        # Password field
+        password_label = QLabel("Password:")
+        password_label.setStyleSheet("color: white; font-size: 14px; background: transparent;")
+        layout.addWidget(password_label)
+        
         self.reg_password = QLineEdit()
         self.reg_password.setPlaceholderText("Create a password")
         self.reg_password.setEchoMode(QLineEdit.Password)
-        self.reg_password.setStyleSheet("font-size: 14px; padding: 10px;")
-        layout.addWidget(QLabel("Password:"))
+        self.reg_password.setStyleSheet("""
+            QLineEdit {
+                font-size: 14px; 
+                padding: 10px;
+                background: rgba(255, 255, 255, 0.9);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                border-radius: 5px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #27ae60;
+                background: white;
+            }
+        """)
         layout.addWidget(self.reg_password)
 
+        # Confirm password field
+        confirm_label = QLabel("Confirm Password:")
+        confirm_label.setStyleSheet("color: white; font-size: 14px; background: transparent;")
+        layout.addWidget(confirm_label)
+        
         self.reg_confirm = QLineEdit()
         self.reg_confirm.setPlaceholderText("Confirm your password")
         self.reg_confirm.setEchoMode(QLineEdit.Password)
-        self.reg_confirm.setStyleSheet("font-size: 14px; padding: 10px;")
-        layout.addWidget(QLabel("Confirm Password:"))
+        self.reg_confirm.setStyleSheet("""
+            QLineEdit {
+                font-size: 14px; 
+                padding: 10px;
+                background: rgba(255, 255, 255, 0.9);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                border-radius: 5px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #27ae60;
+                background: white;
+            }
+        """)
         layout.addWidget(self.reg_confirm)
 
+        # Register button
         btn_layout = QHBoxLayout()
         reg_btn = QPushButton("Register")
         reg_btn.setStyleSheet("""
@@ -233,9 +382,13 @@ class LoginDialog(QDialog):
                 padding: 12px;
                 font-size: 16px;
                 border-radius: 6px;
+                border: none;
             }
             QPushButton:hover {
                 background-color: #219a52;
+            }
+            QPushButton:pressed {
+                background-color: #1e8449;
             }
         """)
         reg_btn.clicked.connect(self.do_register)
