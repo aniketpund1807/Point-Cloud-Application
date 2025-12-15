@@ -397,20 +397,24 @@ class PointCloudViewer(ApplicationUI):
             self.current_worksheet_data = config_data.copy()
             self.display_current_worksheet(config_data)
 
-            # ====================== NEW: ADD FIRST LAYER AUTOMATICALLY ======================
+            # Auto-create first layer
             layer_name = data["first_layer_name"]
-            dimension = data["layer_type"]  # "3D" or "2D"
-
-            # Use the same method used for design layers
+            dimension = data["layer_type"]
             self.add_layer_to_panel(layer_name, dimension)
-
             self.message_text.append(f"Auto-created first layer: {layer_name} ({dimension})")
-            # ============================================================================
 
             QMessageBox.information(self, "Success", 
                                     f"Worksheet '{worksheet_name}' created successfully!\n"
                                     f"First layer added: {layer_name}\n\n"
                                     f"Saved in:\n{worksheet_folder}")
+
+            # ==================== NEW: AUTO-LOAD POINT CLOUD FROM SELECTED PROJECT ====================
+            project_name = data["project_name"]
+            if project_name and project_name != "None":
+                self.auto_load_pointcloud_from_project(project_name)
+            else:
+                self.message_text.append("No project selected – point cloud not loaded automatically.")
+
     # =======================================================================================================================================
     def display_current_worksheet(self, data):
         """Display the current worksheet details in the left panel"""
@@ -1018,18 +1022,33 @@ class PointCloudViewer(ApplicationUI):
                     self.message_text.append(f"Project folder or config not found:\n{config_path}")
             else:
                 self.message_text.append("No project linked to this worksheet.")
+                
     # =======================================================================================================================================
     def load_point_cloud_files(self, file_list):
-        """Load multiple point cloud files (merge or first one)"""
+        """Load multiple point cloud files (merge or first one) - currently loads first file with progress bar"""
         if not file_list:
             return
+
         # For simplicity, load first file
         first_file = file_list[0]
+        file_path = first_file  # For consistency with the single-load method
+
+        # Store the loaded file path and name (same as single load)
+        self.loaded_file_path = file_path
+        self.loaded_file_name = os.path.splitext(os.path.basename(file_path))[0]
+
         try:
-            self.point_cloud = o3d.io.read_point_cloud(first_file)
+            # Show progress bar with file info
+            self.show_progress_bar(file_path)
+            self.update_progress(10, "Starting file loading...")
+
+            self.update_progress(30, "Loading point cloud data...")
+            self.point_cloud = o3d.io.read_point_cloud(file_path)
+
             if self.point_cloud.is_empty():
-                self.message_text.append("Point cloud is empty!")
-                return
+                raise ValueError("Point cloud is empty!")
+
+            self.update_progress(50, "Converting to VTK format...")
 
             # Display in VTK
             points = np.asarray(self.point_cloud.points)
@@ -1049,15 +1068,20 @@ class PointCloudViewer(ApplicationUI):
             poly_data.SetVerts(vertices)
 
             if colors is not None:
+                self.update_progress(70, "Processing colors...")
                 vtk_colors = vtk.vtkUnsignedCharArray()
                 vtk_colors.SetNumberOfComponents(3)
                 vtk_colors.SetName("Colors")
                 for c in (colors * 255).astype(np.uint8):
                     vtk_colors.InsertNextTuple(c)
                 poly_data.GetPointData().SetScalars(vtk_colors)
+            else:
+                self.update_progress(70, "Preparing visualization...")
 
             mapper = vtk.vtkPolyDataMapper()
             mapper.SetInputData(poly_data)
+
+            self.update_progress(90, "Creating visualization...")
 
             if self.point_cloud_actor:
                 self.renderer.RemoveActor(self.point_cloud_actor)
@@ -1070,9 +1094,15 @@ class PointCloudViewer(ApplicationUI):
             self.renderer.ResetCamera()
             self.vtk_widget.GetRenderWindow().Render()
 
-            self.message_text.append(f"Loaded point cloud: {os.path.basename(first_file)}")
+            self.update_progress(100, "Loading complete!")
+            QTimer.singleShot(500, self.hide_progress_bar)
+
+            self.message_text.append(f"Successfully loaded point cloud: {os.path.basename(file_path)}")
+
         except Exception as e:
-            self.message_text.append(f"Failed to load point cloud: {e}")
+            self.hide_progress_bar()
+            self.message_text.append(f"Failed to load point cloud '{os.path.basename(file_path)}': {str(e)}")
+            QMessageBox.warning(self, "Load Failed", f"Could not load point cloud:\n{file_path}\n\nError: {str(e)}")
 
     # =======================================================================================================================================
     def show_help_dialog(self):
@@ -2427,6 +2457,8 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             self.hide_progress_bar()
 
+
+# =======================================================================================================================================
     def display_point_cloud(self):
         if not self.point_cloud:
             return
@@ -3905,3 +3937,109 @@ class PointCloudViewer(ApplicationUI):
         super(PointCloudViewer, self).resizeEvent(event)
         if self.vtk_widget:
             self.vtk_widget.GetRenderWindow().Render()
+
+# =================================================================================================================================
+
+    # -------------------------------------------------
+    # LOAD POINT CLOUD FROM PATH (PROGRAMMATIC - NO DIALOG)
+    # -------------------------------------------------
+    def load_point_cloud_from_path(self, file_path: str):
+        """
+        Load a point cloud from a given file path without showing QFileDialog.
+        Used for auto-loading point clouds linked to a project after creating a new worksheet.
+        Reuses the same logic as load_point_cloud() for consistency.
+        """
+        if not file_path or not os.path.exists(file_path):
+            self.message_text.append(f"Point cloud file not found or invalid: {file_path}")
+            return False
+
+        try:
+            # Store the loaded file path and name
+            self.loaded_file_path = file_path
+            self.loaded_file_name = os.path.splitext(os.path.basename(file_path))[0]
+
+            # Show progress bar with file info
+            self.show_progress_bar(file_path)
+            self.update_progress(10, "Starting file loading...")
+
+            # Read the file
+            if file_path.lower().endswith(('.ply', '.pcd')):
+                self.update_progress(30, "Loading point cloud data...")
+                self.point_cloud = o3d.io.read_point_cloud(file_path)
+
+            elif file_path.lower().endswith('.xyz'):
+                self.update_progress(30, "Loading XYZ data...")
+                data = np.loadtxt(file_path, usecols=(0, 1, 2))
+                self.point_cloud = o3d.geometry.PointCloud()
+                self.point_cloud.points = o3d.utility.Vector3dVector(data[:, :3])
+
+            else:
+                raise ValueError(f"Unsupported file format: {os.path.splitext(file_path)[1]}")
+
+            if not self.point_cloud.has_points():
+                raise ValueError("No points found in the file.")
+
+            if self.point_cloud.has_colors():
+                self.update_progress(70, "Processing colors...")
+            else:
+                self.update_progress(70, "Preparing visualization...")
+
+            self.update_progress(90, "Creating visualization...")
+            self.display_point_cloud()
+
+            self.update_progress(100, "Loading complete!")
+            QTimer.singleShot(500, self.hide_progress_bar)
+
+            self.message_text.append(f"Successfully loaded point cloud: {os.path.basename(file_path)}")
+            return True
+
+        except Exception as e:
+            self.hide_progress_bar()
+            self.message_text.append(f"Failed to load point cloud '{os.path.basename(file_path)}': {str(e)}")
+            QMessageBox.warning(self, "Load Failed", f"Could not load point cloud:\n{file_path}\n\nError: {str(e)}")
+            return False
+        
+
+
+
+    def auto_load_pointcloud_from_project(self, project_name: str):
+        """
+        Automatically load all point cloud files linked to the selected project
+        after creating a new worksheet.
+        """
+        project_folder = os.path.join(self.PROJECTS_BASE_DIR, project_name)
+        config_path = os.path.join(project_folder, "project_config.txt")
+
+        if not os.path.exists(config_path):
+            self.message_text.append(f"Project config not found: {config_path}")
+            return
+
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                project_data = json.load(f)
+        except Exception as e:
+            self.message_text.append(f"Error reading project config: {e}")
+            return
+
+        pointcloud_files = project_data.get("pointcloud_files", [])
+        if not pointcloud_files:
+            self.message_text.append(f"No point cloud files linked to project '{project_name}'.")
+            return
+
+        self.message_text.append(f"Auto-loading {len(pointcloud_files)} point cloud file(s) from project '{project_name}'...")
+
+        success_count = 0
+        for file_path in pointcloud_files:
+            if self.load_point_cloud_from_path(file_path):
+                success_count += 1
+            else:
+                self.message_text.append(f"Skipped: {os.path.basename(file_path)}")
+
+        if success_count > 0:
+            self.message_text.append(f"Successfully loaded {success_count}/{len(pointcloud_files)} point cloud(s).")
+            # Optional: Reset camera to fit the new point cloud
+            if self.renderer and self.vtk_widget:
+                self.renderer.ResetCamera()
+                self.vtk_widget.GetRenderWindow().Render()
+        else:
+            self.message_text.append("No point clouds were loaded successfully.")
