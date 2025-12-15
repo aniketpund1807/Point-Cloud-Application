@@ -397,8 +397,20 @@ class PointCloudViewer(ApplicationUI):
             self.current_worksheet_data = config_data.copy()
             self.display_current_worksheet(config_data)
 
-            QMessageBox.information(self, "Success", f"Worksheet '{worksheet_name}' created successfully!\nSaved in:\n{worksheet_folder}")
+            # ====================== NEW: ADD FIRST LAYER AUTOMATICALLY ======================
+            layer_name = data["first_layer_name"]
+            dimension = data["layer_type"]  # "3D" or "2D"
 
+            # Use the same method used for design layers
+            self.add_layer_to_panel(layer_name, dimension)
+
+            self.message_text.append(f"Auto-created first layer: {layer_name} ({dimension})")
+            # ============================================================================
+
+            QMessageBox.information(self, "Success", 
+                                    f"Worksheet '{worksheet_name}' created successfully!\n"
+                                    f"First layer added: {layer_name}\n\n"
+                                    f"Saved in:\n{worksheet_folder}")
     # =======================================================================================================================================
     def display_current_worksheet(self, data):
         """Display the current worksheet details in the left panel"""
@@ -414,78 +426,7 @@ class PointCloudViewer(ApplicationUI):
         self.worksheet_display.setTitle(f"Active: {data['worksheet_name']}")
 
     # =======================================================================================================================================
-    # # OPEN CREATE NEW DESIGN LAYER DIALOG
-    # def open_create_new_design_layer_dialog(self):
-    #     """Open the Design New Layer dialog and configure UI based on selection (2D or 3D)"""
-    #     dialog = DesignNewDialog(self)
-    #     if dialog.exec_() == QDialog.Accepted:
-    #         config = dialog.get_configuration()
-
-    #         dimension = config["dimension"]        # "2D" or "3D"
-    #         ref_type = config["reference_type"]    # "Road", "Bridge", or None
-    #         ref_line = config["reference_line"]    # e.g. "Surface line"
-
-    #         # ALWAYS SHOW BOTTOM SECTION when OK is clicked (whether 2D or 3D)
-    #         self.bottom_section.setVisible(True)
-
-    #         # --- HIDE ALL LINE CONTAINERS FIRST ---
-    #         # Road lines
-    #         self.surface_container.setVisible(False)
-    #         self.construction_container.setVisible(False)
-    #         self.road_surface_container.setVisible(False)
-    #         self.zero_container.setVisible(False)
-
-    #         # Bridge lines
-    #         self.deck_line_container.setVisible(False)
-    #         self.projection_container.setVisible(False)
-    #         self.construction_dots_container.setVisible(False)
-    #         self.bridge_zero_container.setVisible(False)
-
-    #         # --- NOW SHOW BASED ON Road / Bridge SELECTION (regardless of 2D/3D) ---
-    #         if ref_type == "Road":
-    #             # Show Road-related lines
-    #             self.surface_container.setVisible(True)
-    #             self.construction_container.setVisible(True)
-    #             self.road_surface_container.setVisible(True)
-    #             self.zero_container.setVisible(True)
-
-    #             self.message_text.append(f"Design Layer Created: {dimension} - ROAD Mode")
-    #             if ref_line:
-    #                 self.message_text.append(f"Reference Line: {ref_line}")
-
-    #         elif ref_type == "Bridge":
-    #             # Show Bridge-related lines
-    #             self.deck_line_container.setVisible(True)
-    #             self.projection_container.setVisible(True)
-    #             self.construction_dots_container.setVisible(True)
-    #             self.bridge_zero_container.setVisible(True)
-
-    #             self.message_text.append(f"Design Layer Created: {dimension} - BRIDGE Mode")
-    #             if ref_line:
-    #                 self.message_text.append(f"Reference Line: {ref_line}")
-
-    #         else:
-    #             # No Road/Bridge selected — still show bottom section, but no lines
-    #             self.message_text.append(f"Design Layer Created: {dimension} - No reference type selected")
-
-    #         # Always show action buttons when a design session starts
-    #         self.preview_button.setVisible(True)
-    #         self.threed_map_button.setVisible(True)
-    #         self.save_button.setVisible(True)
-
-    #         # Optional: Auto-check zero line for drawing
-    #         if not self.zero_line_set:
-    #             self.zero_line.setChecked(True)
-    #             self.bridge_zero_line.setChecked(True)
-
-    #         # Force redraw
-    #         self.canvas.draw()
-    #         self.vtk_widget.GetRenderWindow().Render()
-
-    #         # Optional: Bring bottom section into view
-    #         QTimer.singleShot(100, lambda: self.bottom_section.raise_())
-
-
+    # OPEN CREATE NEW DESIGN LAYER DIALOG
     def open_create_new_design_layer_dialog(self):
         """Open the Design New Layer dialog and save config to current worksheet's designs folder"""
         # First check if there's an active worksheet
@@ -550,6 +491,10 @@ class PointCloudViewer(ApplicationUI):
                 self.message_text.append(f"   → Dimension: {dimension}")
                 if ref_type:
                     self.message_text.append(f"   → Type: {ref_type} ({ref_line or 'No reference'})")
+
+                # ==================== NEW: ADD LAYER NAME TO LEFT PANEL ====================
+                self.add_layer_to_panel(layer_name, dimension)
+                # ==========================================================================
 
             except Exception as e:
                 QMessageBox.critical(self, "Save Failed", f"Could not save design layer config:\n{str(e)}")
@@ -1035,7 +980,6 @@ class PointCloudViewer(ApplicationUI):
             # Original save functionality for road/bridge
             self.message_text.append("Configuration saved!")
 
-    # =======================================================================================================================================
     # =======================================================================================================================================
     def open_existing_worksheet(self):
         dialog = ExistingWorksheetDialog(self)

@@ -127,6 +127,9 @@ class ApplicationUI(QMainWindow):
         self.point_labels = []  # For storing point label annotations
         self.current_point_labels = []  # For current drawing session
 
+        self.three_D_layers_layout = None   # Will hold QVBoxLayout for 3D layers
+        self.two_D_layers_layout = None     # Will hold QVBoxLayout for 2D layers
+
 # ---------------------------------------------------------------------------------------------------------------------------
         #self.WORKSHEET_FILE = "worksheet.txt"
 
@@ -431,7 +434,7 @@ class ApplicationUI(QMainWindow):
         # Add worksheet display at the very top of left section
         left_layout.insertWidget(0, self.worksheet_display)
 
-        # ---------------------------------------------------------------------------
+        # --------------------------------------------------------------------------- 
         # 3D Layers Section
         # ---------------------------------------------------------------------------
         three_D_frame = QFrame()
@@ -441,7 +444,7 @@ class ApplicationUI(QMainWindow):
                 border: 2px solid #42A5F5; 
                 border-radius: 10px; 
                 background-color: #E3F2FD; 
-                margin: 10px; 
+                margin: 5px 10px;
             }
         """)
         three_D_layout = QVBoxLayout(three_D_frame)
@@ -450,25 +453,40 @@ class ApplicationUI(QMainWindow):
         three_D_title.setAlignment(Qt.AlignCenter)
         three_D_title.setStyleSheet("""
             font-weight: bold; 
-            font-size: 13px; 
+            font-size: 14px; 
             padding: 8px; 
-            background-color: #E3F2FD; 
-            border-radius: 5px;
+            background-color: #BBDEFB; 
+            border-radius: 6px;
+            color: #1565C0;
         """)
         three_D_layout.addWidget(three_D_title)
-        three_D_layout.addStretch()
 
-        # ---------------------------------------------------------------------------
+        # Scroll area for 3D layers
+        three_D_scroll = QScrollArea()
+        three_D_scroll.setWidgetResizable(True)
+        three_D_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        three_D_scroll.setStyleSheet("background-color: white; border: none;")
+        
+        three_D_content = QWidget()
+        self.three_D_layers_layout = QVBoxLayout(three_D_content)
+        self.three_D_layers_layout.setAlignment(Qt.AlignTop)
+        self.three_D_layers_layout.setSpacing(6)
+        self.three_D_layers_layout.addStretch()  # Push items to top
+        
+        three_D_scroll.setWidget(three_D_content)
+        three_D_layout.addWidget(three_D_scroll)
+
+        # --------------------------------------------------------------------------- 
         # 2D Layers Section
         # ---------------------------------------------------------------------------
         two_D_frame = QFrame()
         two_D_frame.setFrameStyle(QFrame.Box | QFrame.Raised)
         two_D_frame.setStyleSheet("""
             QFrame { 
-                border: 2px solid #42A5F5; 
+                border: 2px solid #66BB6A; 
                 border-radius: 10px; 
-                background-color: #E3F2FD; 
-                margin: 10px; 
+                background-color: #E8F5E9; 
+                margin: 5px 10px;
             }
         """)
         two_D_layout = QVBoxLayout(two_D_frame)
@@ -477,18 +495,37 @@ class ApplicationUI(QMainWindow):
         two_D_title.setAlignment(Qt.AlignCenter)
         two_D_title.setStyleSheet("""
             font-weight: bold; 
-            font-size: 13px; 
-                padding: 8px; 
-            background-color: #E3F2FD; 
-            border-radius: 5px;
+            font-size: 14px; 
+            padding: 8px; 
+            background-color: #C8E6C9; 
+            border-radius: 6px;
+            color: #2E7D32;
         """)
         two_D_layout.addWidget(two_D_title)
-        two_D_layout.addStretch()
 
-        # Add sections to left layout
-        left_layout.addWidget(merger_frame)
+        # Scroll area for 2D layers
+        two_D_scroll = QScrollArea()
+        two_D_scroll.setWidgetResizable(True)
+        two_D_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        two_D_scroll.setStyleSheet("background-color: white; border: none;")
+        
+        two_D_content = QWidget()
+        self.two_D_layers_layout = QVBoxLayout(two_D_content)
+        self.two_D_layers_layout.setAlignment(Qt.AlignTop)
+        self.two_D_layers_layout.setSpacing(6)
+        self.two_D_layers_layout.addStretch()
+        
+        two_D_scroll.setWidget(two_D_content)
+        two_D_layout.addWidget(two_D_scroll)
+
+        # === ADD BOTH FRAMES TO LEFT PANEL ===
+        #left_layout.addWidget(merger_frame)
         left_layout.addWidget(three_D_frame)
         left_layout.addWidget(two_D_frame)
+
+        # Optional: Add stretch at bottom so layers stay at top
+        left_layout.addStretch()
+
 
         # ==================== MESSAGE SECTION (COLLAPSIBLE) ====================
         self.message_button = QPushButton("Message")
@@ -1723,4 +1760,33 @@ class ApplicationUI(QMainWindow):
                 self.message_text.append("No data available for auto-fit.")
         except Exception as e:
             self.message_text.append(f"Auto-fit error: {str(e)}")
-   
+
+# =============================================================================
+    def add_layer_to_panel(self, layer_name: str, dimension: str):
+        """
+        Adds a layer label to the correct panel (3D or 2D Layers).
+        Used for both worksheet initial layers and design layers.
+        """
+        label = QLabel(f"• {layer_name}")
+        label.setStyleSheet("""
+            QLabel {
+                padding: 8px 12px;
+                background-color: rgba(255, 255, 255, 0.9);
+                border-radius: 8px;
+                margin: 3px 8px;
+                font-size: 13px;
+                color: #0D47A1;
+                border-left: 4px solid #1976D2;
+            }
+            QLabel:hover {
+                background-color: #BBDEFB;
+            }
+        """)
+        label.setToolTip(f"{dimension} Layer: {layer_name}")
+
+        if dimension == "3D":
+            if self.three_D_layers_layout:
+                self.three_D_layers_layout.insertWidget(self.three_D_layers_layout.count() - 1, label)
+        elif dimension == "2D":
+            if self.two_D_layers_layout:
+                self.two_D_layers_layout.insertWidget(self.two_D_layers_layout.count() - 1, label)

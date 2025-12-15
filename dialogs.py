@@ -1400,26 +1400,26 @@ class WorksheetNewDialog(QDialog):
         self.name_edit.setPlaceholderText("Enter worksheet name")
         form.addWidget(self.name_edit, 0, 1)
 
-        # Worksheet Type
-        form.addWidget(QLabel("Worksheet Type:"), 1, 0)
-        self.type_combo = QComboBox()
-        self.type_combo.addItems(["None", "Design", "Construction", "Measurement"])
-        form.addWidget(self.type_combo, 1, 1)
-
         # Project Name – NOW LOADED FROM E:\3D_Tool\projects\*
-        form.addWidget(QLabel("Project Name:"), 2, 0)
+        form.addWidget(QLabel("Project Name:"), 1, 0)
         self.project_combo = QComboBox()
         self.project_combo.addItem("None")  # Default
 
         self.load_projects_from_folders()  # ← Key function
 
-        form.addWidget(self.project_combo, 2, 1)
+        form.addWidget(self.project_combo, 1, 1)
 
         # Worksheet Category
-        form.addWidget(QLabel("Worksheet Category:"), 3, 0)
+        form.addWidget(QLabel("Worksheet Category:"), 2, 0)
         self.category_combo = QComboBox()
         self.category_combo.addItems(["None", "Road", "Bridge", "Other"])
-        form.addWidget(self.category_combo, 3, 1)
+        form.addWidget(self.category_combo, 2, 1)
+
+        # Worksheet Type
+        form.addWidget(QLabel("Worksheet Type:"), 3, 0)
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(["None", "Design", "Construction", "Measurement"])
+        form.addWidget(self.type_combo, 3, 1)
 
         # Layer Type (3D / 2D)
         form.addWidget(QLabel("Layer Type:"), 4, 0)
@@ -1488,19 +1488,46 @@ class WorksheetNewDialog(QDialog):
     # ----------------------------------------------------------------------
     # Return data
     # ----------------------------------------------------------------------
+    # def get_data(self):
+    #     layer_type = "3D" if self.radio_3d.isChecked() else "2D"
+    #     project_name = self.project_combo.currentText()
+    #     if project_name == "None":
+    #         project_name = ""
+
+    #     return {
+    #         "worksheet_name": self.name_edit.text().strip(),
+    #         "worksheet_type": self.type_combo.currentText(),
+    #         "project_name": project_name,
+    #         "worksheet_category": self.category_combo.currentText(),
+    #         "layer_type": layer_type
+    #     }
+
+    # ----------------------------------------------------------------------
+    # Return data + generate first layer name
+    # ----------------------------------------------------------------------
     def get_data(self):
         layer_type = "3D" if self.radio_3d.isChecked() else "2D"
         project_name = self.project_combo.currentText()
         if project_name == "None":
             project_name = ""
 
+        worksheet_type = self.type_combo.currentText()
+        if worksheet_type == "None":
+            worksheet_type = "General"  # fallback
+
+        # Generate first layer name: e.g., Design_2D_Layer_1
+        first_layer_name = f"{worksheet_type}_{layer_type}_Layer_1"
+
         return {
             "worksheet_name": self.name_edit.text().strip(),
-            "worksheet_type": self.type_combo.currentText(),
+            "worksheet_type": worksheet_type,
             "project_name": project_name,
             "worksheet_category": self.category_combo.currentText(),
-            "layer_type": layer_type
+            "layer_type": layer_type,
+            "first_layer_name": first_layer_name   # ← NEW: for auto-adding layer
         }
+    
+
 # ===========================================================================================================================
 #                                                ** HELP Dialog Box **
 # ===========================================================================================================================
@@ -2130,4 +2157,3 @@ class ExistingWorksheetDialog(QDialog):
                 return
 
         QMessageBox.warning(self, "Error", "Could not retrieve selected worksheet data.")
-
