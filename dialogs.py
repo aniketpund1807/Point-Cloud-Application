@@ -1046,6 +1046,7 @@ class MeasurementDialog(QDialog):
             return "presized_vertical"
         return None
     
+
 # ===========================================================================================================================
 # DESIGN NEW LAYER DIALOG – With Dynamic Dropdown Based on Road/Bridge Selection
 # ===========================================================================================================================
@@ -1053,14 +1054,13 @@ class DesignNewDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Create New Design Layer")
-        # self.setGeometry(210, 130, 200, 200)
         self.setModal(True)
         self.setMinimumWidth(440)
         self.setStyleSheet("""
             QDialog {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                             stop:0 #f0e6fa, stop:1 #e6e6fa);
-                                            border-radius: 18px;
+                border-radius: 18px;
             }
             QLabel {
                 color: #2d1b3d;
@@ -1096,6 +1096,17 @@ class DesignNewDialog(QDialog):
                 font-size: 13px;
             }
             QComboBox:focus {
+                border: 2px solid #8E24AA;
+                background-color: #F8E8FF;
+            }
+            QLineEdit {
+                border: 2px solid #BA68C8;
+                border-radius: 8px;
+                padding: 8px;
+                background-color: white;
+                font-size: 13px;
+            }
+            QLineEdit:focus {
                 border: 2px solid #8E24AA;
                 background-color: #F8E8FF;
             }
@@ -1137,11 +1148,11 @@ class DesignNewDialog(QDialog):
         layout.addWidget(title)
 
         # ------------------ Layer Name -----------------
-        layer_name = QLabel("Layer Name:")
-        layer_name.setStyleSheet("font-weight: bold;")
-        layout.addWidget(layer_name)
+        layer_name_label = QLabel("Layer Name:")
+        layer_name_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(layer_name_label)
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("Enter layer name")
+        self.name_edit.setPlaceholderText("Enter unique layer name (required)")
         layout.addWidget(self.name_edit)
         
         # === Layer Dimension (3D / 2D) ===
@@ -1149,6 +1160,7 @@ class DesignNewDialog(QDialog):
         dim_layout = QVBoxLayout(dim_group)
         self.radio_3d = QRadioButton("3D")
         self.radio_2d = QRadioButton("2D")
+        self.radio_3d.setChecked(True)  # Default to 3D
         dim_layout.addWidget(self.radio_3d)
         dim_layout.addWidget(self.radio_2d)
         layout.addWidget(dim_group)
@@ -1157,7 +1169,6 @@ class DesignNewDialog(QDialog):
         self.cb_road = QCheckBox("Road")
         self.cb_bridge = QCheckBox("Bridge")
 
-        # Make them mutually exclusive
         def toggle_exclusive(checked_cb):
             if checked_cb.isChecked():
                 other = self.cb_bridge if checked_cb == self.cb_road else self.cb_road
@@ -1177,16 +1188,17 @@ class DesignNewDialog(QDialog):
         ref_layer_layout = QVBoxLayout(self.ref_layer_group)
 
         self.combo_reference = QComboBox()
-        self.combo_reference.setEnabled(False)          # disabled until everything is ready
+        self.combo_reference.setEnabled(False)
 
         ref_layer_layout.addWidget(QLabel("Select reference Layer 2D:"))
         ref_layer_layout.addWidget(self.combo_reference)
         layout.addWidget(self.ref_layer_group)
 
-        # Initially hidden because 2D is default
-        self.ref_layer_group.setVisible(False)
+        # Initially visible only if 3D
+        self.ref_layer_group.setVisible(True)
+        self.update_reference_dropdown()
 
-        # Connect dimension change → show/hide + refresh dropdown
+        # Connect dimension change
         self.radio_3d.toggled.connect(self.on_dimension_changed)
         self.radio_2d.toggled.connect(self.on_dimension_changed)
 
@@ -1206,22 +1218,16 @@ class DesignNewDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
-    # ------------------------------------------------------------------
     def on_dimension_changed(self, checked):
-        """Called whenever 3D or 2D radio button is toggled"""
-        if not checked:                     # the one that became unchecked → ignore
+        if not checked:
             return
-        # Show reference section only for 3D
         self.ref_layer_group.setVisible(self.radio_3d.isChecked())
         self.update_reference_dropdown()
 
-    # ------------------------------------------------------------------
     def update_reference_dropdown(self):
-        """Populate combo box only when 3D + Road/Bridge is selected"""
         self.combo_reference.clear()
         self.combo_reference.setEnabled(False)
 
-        # If we are in 2D → nothing to show (group is already hidden anyway)
         if not self.radio_3d.isChecked():
             return
 
@@ -1232,22 +1238,21 @@ class DesignNewDialog(QDialog):
             items = ["Bridge_Layer_1", "Bridge_Layer_2", "Bridge_Layer_3"]
             self.ref_layer_group.setTitle("Reference Layer - Bridge")
         else:
-            # 3D selected but no Road/Bridge → just show the group with an empty combo
             self.ref_layer_group.setTitle("Reference Layer")
-            self.combo_reference.setEnabled(False)
             return
 
         self.combo_reference.addItems(items)
         self.combo_reference.setCurrentIndex(0)
         self.combo_reference.setEnabled(True)
 
-    # ------------------------------------------------------------------
     def get_configuration(self):
-        """Return final configuration — works correctly for both 2D and 3D"""
+        layer_name = self.name_edit.text().strip()
+        if not layer_name:
+            raise ValueError("Layer name is required!")
+
         reference_type = None
         reference_line = None
 
-        # Only try to get reference if 3D is selected
         if self.radio_3d.isChecked():
             if self.cb_road.isChecked():
                 reference_type = "Road"
@@ -1255,28 +1260,26 @@ class DesignNewDialog(QDialog):
             elif self.cb_bridge.isChecked():
                 reference_type = "Bridge"
                 reference_line = self.combo_reference.currentText()
-
-        # But if 2D is selected, we still want to know if Road/Bridge was checked!
-        # So we check checkboxes directly:
-        if not reference_type:  # Not set from 3D
+        else:  # 2D
             if self.cb_road.isChecked():
                 reference_type = "Road"
-                reference_line = None  # No dropdown in 2D
             elif self.cb_bridge.isChecked():
                 reference_type = "Bridge"
-                reference_line = None
 
         return {
+            "layer_name": layer_name,
             "dimension": "3D" if self.radio_3d.isChecked() else "2D",
             "reference_type": reference_type,
             "reference_line": reference_line
         }
-    
+
+
 # ===========================================================================================================================
 # ** WORKSHEET NEW DIALOG **
 # ===========================================================================================================================
+
 class WorksheetNewDialog(QDialog):
-    """Dialog that matches exactly the hand-drawn worksheet you showed."""
+    """Dialog for creating a new worksheet – loads projects from E:\3D_Tool\projects folder structure."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("New Worksheet")
@@ -1284,7 +1287,7 @@ class WorksheetNewDialog(QDialog):
         self.resize(480, 380)
 
         # ------------------------------------------------------------------
-        # Beautiful style – matches the other dialogs you already use
+        # Beautiful style – consistent with your app theme
         # ------------------------------------------------------------------
         self.setStyleSheet("""
             QDialog {
@@ -1385,7 +1388,7 @@ class WorksheetNewDialog(QDialog):
         main_layout.addWidget(title)
 
         # ------------------------------------------------------------------
-        # Form fields (exactly like the drawing)
+        # Form fields
         # ------------------------------------------------------------------
         form = QGridLayout()
         form.setHorizontalSpacing(20)
@@ -1397,44 +1400,35 @@ class WorksheetNewDialog(QDialog):
         self.name_edit.setPlaceholderText("Enter worksheet name")
         form.addWidget(self.name_edit, 0, 1)
 
-        # Worksheet Type (dropdown)
+        # Worksheet Type
         form.addWidget(QLabel("Worksheet Type:"), 1, 0)
         self.type_combo = QComboBox()
         self.type_combo.addItems(["None", "Design", "Construction", "Measurement"])
         form.addWidget(self.type_combo, 1, 1)
 
-        # Project Name (dropdown) - populated from project_config.txt
+        # Project Name – NOW LOADED FROM E:\3D_Tool\projects\*
         form.addWidget(QLabel("Project Name:"), 2, 0)
         self.project_combo = QComboBox()
-        self.project_combo.addItem("None")  # Default option
+        self.project_combo.addItem("None")  # Default
 
-        # Load projects from project_config.txt
-        if os.path.exists("project_config.txt"):
-            try:
-                with open("project_config.txt", 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            proj = json.loads(line)
-                            self.project_combo.addItem(proj["project_name"])
-            except Exception as e:
-                print(f"Error loading projects: {e}")
+        self.load_projects_from_folders()  # ← Key function
 
         form.addWidget(self.project_combo, 2, 1)
 
-        # Worksheet Category (dropdown)
+        # Worksheet Category
         form.addWidget(QLabel("Worksheet Category:"), 3, 0)
         self.category_combo = QComboBox()
         self.category_combo.addItems(["None", "Road", "Bridge", "Other"])
         form.addWidget(self.category_combo, 3, 1)
 
-        # === Layer Type (3D / 2D) ===
+        # Layer Type (3D / 2D)
         form.addWidget(QLabel("Layer Type:"), 4, 0)
         dim_group = QWidget()
         dim_layout = QHBoxLayout(dim_group)
         dim_layout.setContentsMargins(0, 0, 0, 0)
         self.radio_3d = QRadioButton("3D")
         self.radio_2d = QRadioButton("2D")
+        self.radio_3d.setChecked(True)  # Default to 3D
 
         dim_layout.addWidget(self.radio_3d)
         dim_layout.addWidget(self.radio_2d)
@@ -1444,7 +1438,7 @@ class WorksheetNewDialog(QDialog):
         main_layout.addLayout(form)
 
         # ------------------------------------------------------------------
-        # Buttons (OK / Cancel)
+        # Buttons
         # ------------------------------------------------------------------
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
@@ -1462,18 +1456,51 @@ class WorksheetNewDialog(QDialog):
         main_layout.addLayout(btn_layout)
 
     # ----------------------------------------------------------------------
-    # Helper – return everything the main window needs
+    # Load all projects from E:\3D_Tool\projects\* folders
+    # ----------------------------------------------------------------------
+    def load_projects_from_folders(self):
+        BASE_PROJECTS_DIR = r"E:\3D_Tool\projects"
+        if not os.path.exists(BASE_PROJECTS_DIR):
+            print("Projects directory not found:", BASE_PROJECTS_DIR)
+            return
+
+        import glob
+
+        # Find all project_config.txt files in subfolders
+        config_files = glob.glob(os.path.join(BASE_PROJECTS_DIR, "*", "project_config.txt"))
+
+        if not config_files:
+            print("No project_config.txt files found in subfolders.")
+            return
+
+        for config_path in config_files:
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)  # Single JSON object per file
+                    project_name = data.get("project_name", "Unknown Project")
+                    self.project_combo.addItem(project_name)
+            except Exception as e:
+                print(f"Error reading {config_path}: {e}")
+
+        # Optional: Sort alphabetically
+        self.project_combo.model().sort(0)
+
+    # ----------------------------------------------------------------------
+    # Return data
     # ----------------------------------------------------------------------
     def get_data(self):
         layer_type = "3D" if self.radio_3d.isChecked() else "2D"
+        project_name = self.project_combo.currentText()
+        if project_name == "None":
+            project_name = ""
+
         return {
             "worksheet_name": self.name_edit.text().strip(),
             "worksheet_type": self.type_combo.currentText(),
-            "project_name": self.project_combo.currentText() if self.project_combo.currentText() != "None" else "",
+            "project_name": project_name,
             "worksheet_category": self.category_combo.currentText(),
             "layer_type": layer_type
         }
-
 # ===========================================================================================================================
 #                                                ** HELP Dialog Box **
 # ===========================================================================================================================
@@ -1874,14 +1901,14 @@ class CreateProjectDialog(QDialog):
     def get_data(self):
         return {
             "project_name": self.name_edit.text().strip(),
-            "project_type": self.type_combo.currentText(),
             "pointcloud_files": self.selected_files.copy(),
             "category": self.category_combo.currentText(),
             "file_count": len(self.selected_files)
         }
 
+
 # ===========================================================================================================================
-# ** EXISTING WORKSHEET DIALOG - WITH CHECKBOXES FOR EASY SELECTION **
+# ** EXISTING WORKSHEET DIALOG - SCANS FOLDERS AND LOADS worksheet_config.txt **
 # ===========================================================================================================================
 class ExistingWorksheetDialog(QDialog):
     def __init__(self, parent=None):
@@ -1890,6 +1917,12 @@ class ExistingWorksheetDialog(QDialog):
         self.setModal(True)
         self.resize(700, 550)
         self.selected_worksheet = None
+
+        # Get the base worksheets directory from parent (PointCloudViewer)
+        if parent and hasattr(parent, 'WORKSHEETS_BASE_DIR'):
+            self.base_dir = parent.WORKSHEETS_BASE_DIR
+        else:
+            self.base_dir = r"E:\3D_Tool\user\worksheets"  # fallback
 
         # Main layout
         main_layout = QVBoxLayout(self)
@@ -1909,7 +1942,7 @@ class ExistingWorksheetDialog(QDialog):
         """)
         main_layout.addWidget(title)
 
-        # Scrollable area for worksheets
+        # Scrollable area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("""
@@ -1926,7 +1959,7 @@ class ExistingWorksheetDialog(QDialog):
         scroll_layout.setSpacing(12)
         scroll_layout.setAlignment(Qt.AlignTop)
 
-        # Group box to contain all radio buttons (ensures only one selected)
+        # Group box
         self.radio_group_box = QGroupBox("Available Worksheets")
         self.radio_group_box.setStyleSheet("""
             QGroupBox {
@@ -1950,83 +1983,98 @@ class ExistingWorksheetDialog(QDialog):
         radio_layout.setSpacing(10)
         radio_layout.setContentsMargins(10, 10, 10, 10)
 
-        # Button group to manage mutual exclusivity
+        # Button group for mutual exclusivity
         self.button_group = QButtonGroup()
         self.button_group.setExclusive(True)
 
-        # Load worksheets and create radio buttons
         self.worksheets = []
-        self.radio_buttons = []  # To keep reference
+        self.radio_buttons = []
 
-        if os.path.exists("worksheet.txt"):
-            try:
-                with open("worksheet.txt", 'r', encoding='utf-8') as f:
-                    lines = [line.strip() for line in f if line.strip()]
-                    if not lines:
-                        no_ws_label = QLabel("No worksheets found.")
-                        no_ws_label.setStyleSheet("color: #666; font-style: italic;")
-                        radio_layout.addWidget(no_ws_label)
-                    else:
-                        for line in lines:
-                            data = json.loads(line)
-                            self.worksheets.append(data)
-
-                            name = data.get("worksheet_name", "Unnamed Worksheet")
-                            proj = data.get("project_name", "No Project")
-                            date_str = data.get("created_at", "")
-                            if date_str:
-                                try:
-                                    date = datetime.fromisoformat(date_str.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
-                                except:
-                                    date = date_str[:19]
-                            else:
-                                date = "Unknown date"
-
-                            # Create radio button with rich text label
-                            radio = QRadioButton()
-                            label_text = f"<b>{name}</b><br>"
-                            label_text += f"<small>Project: <i>{proj}</i> | Created: {date}</small>"
-
-                            label = QLabel(label_text)
-                            label.setWordWrap(True)
-                            label.setStyleSheet("""
-                                QLabel {
-                                    background-color: #F8E8FF;
-                                    padding: 12px;
-                                    border-radius: 8px;
-                                    border: 1px solid #E1BEE7;
-                                }
-                            """)
-
-                            # Container for radio + label
-                            item_widget = QWidget()
-                            item_layout = QHBoxLayout(item_widget)
-                            item_layout.setContentsMargins(0, 0, 0, 0)
-                            item_layout.addWidget(radio)
-                            item_layout.addWidget(label, 1)
-
-                            radio_layout.addWidget(item_widget)
-
-                            # Add to button group
-                            self.button_group.addButton(radio)
-                            self.radio_buttons.append((radio, data))
-
-            except Exception as e:
-                error_label = QLabel(f"Error loading worksheets: {str(e)}")
-                error_label.setStyleSheet("color: red;")
-                radio_layout.addWidget(error_label)
+        # === SCAN WORKSHEET FOLDERS ===
+        if not os.path.exists(self.base_dir):
+            no_dir_label = QLabel(f"Worksheets directory not found:\n{self.base_dir}")
+            no_dir_label.setStyleSheet("color: red; font-style: italic;")
+            radio_layout.addWidget(no_dir_label)
         else:
-            no_file_label = QLabel("No worksheet file found (worksheet.txt missing).")
-            no_file_label.setStyleSheet("color: #888; font-style: italic;")
-            radio_layout.addWidget(no_file_label)
+            found_any = False
+            for folder_name in sorted(os.listdir(self.base_dir)):
+                folder_path = os.path.join(self.base_dir, folder_name)
+                if not os.path.isdir(folder_path):
+                    continue
+
+                config_path = os.path.join(folder_path, "worksheet_config.txt")
+                if not os.path.exists(config_path):
+                    continue  # Skip if no config file
+
+                try:
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+
+                    found_any = True
+                    self.worksheets.append(data)
+
+                    name = data.get("worksheet_name", folder_name)
+                    proj = data.get("project_name", "No Project")
+                    if proj == "None" or not proj:
+                        proj = "No Project"
+
+                    date_str = data.get("created_at", "")
+                    if date_str:
+                        try:
+                            # Handle ISO format with or without Z
+                            date_str = date_str.replace("Z", "+00:00")
+                            date = datetime.fromisoformat(date_str).strftime("%Y-%m-%d %H:%M")
+                        except:
+                            date = date_str[:19] if len(date_str) >= 19 else date_str
+                    else:
+                        date = "Unknown"
+
+                    # Create radio button with rich info
+                    radio = QRadioButton()
+                    label_text = f"<b>{name}</b><br>"
+                    label_text += f"<small>Project: <i>{proj}</i> | Created: {date}<br>"
+                    label_text += f"Folder: {folder_name}</small>"
+
+                    label = QLabel(label_text)
+                    label.setWordWrap(True)
+                    label.setStyleSheet("""
+                        QLabel {
+                            background-color: #F8E8FF;
+                            padding: 14px;
+                            border-radius: 10px;
+                            border: 1px solid #E1BEE7;
+                        }
+                    """)
+
+                    # Container widget
+                    item_widget = QWidget()
+                    item_layout = QHBoxLayout(item_widget)
+                    item_layout.setContentsMargins(0, 0, 0, 0)
+                    item_layout.addWidget(radio)
+                    item_layout.addWidget(label, 1)
+
+                    radio_layout.addWidget(item_widget)
+
+                    # Add to button group
+                    self.button_group.addButton(radio)
+                    self.radio_buttons.append((radio, data))
+
+                except Exception as e:
+                    error_item = QLabel(f"⚠ Error loading {folder_name}: {str(e)}")
+                    error_item.setStyleSheet("color: orange; font-size: 12px;")
+                    radio_layout.addWidget(error_item)
+
+            if not found_any:
+                no_ws_label = QLabel("No worksheets found in the directory.")
+                no_ws_label.setStyleSheet("color: #666; font-style: italic; padding: 20px;")
+                radio_layout.addWidget(no_ws_label)
 
         scroll_layout.addWidget(self.radio_group_box)
         scroll_layout.addStretch()
-
         scroll.setWidget(scroll_content)
         main_layout.addWidget(scroll)
 
-        # Buttons at bottom
+        # Bottom buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
@@ -2075,13 +2123,11 @@ class ExistingWorksheetDialog(QDialog):
             QMessageBox.information(self, "No Selection", "Please select a worksheet to open.")
             return
 
-        # Find the corresponding worksheet data
         for radio, data in self.radio_buttons:
             if radio is selected_button:
                 self.selected_worksheet = data
                 self.accept()
                 return
 
-        QMessageBox.warning(self, "Error", "Could not retrieve selected worksheet.")
-
+        QMessageBox.warning(self, "Error", "Could not retrieve selected worksheet data.")
 

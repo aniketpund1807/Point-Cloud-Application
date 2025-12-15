@@ -31,8 +31,22 @@ from dialogs import (ConstructionConfigDialog, CurveDialog, ZeroLineDialog, Mate
 #                                                        ** CLASS POINTCLOUDVIEWER **
 # =============================================================================================================================================
 class PointCloudViewer(ApplicationUI):
-    def __init__(self):
+    def __init__(self, username=None):  # Add username parameter
         super().__init__()
+        self.current_user = username or "guest"  # Store logged-in user
+
+        # Add these lines
+        self.current_worksheet_name = None
+        self.current_project_name = None     # <-- Important
+        self.current_worksheet_data = {}
+
+        # Define worksheet base directory
+        self.WORKSHEETS_BASE_DIR = r"E:\3D_Tool\user\worksheets"
+        os.makedirs(self.WORKSHEETS_BASE_DIR, exist_ok=True)
+
+        # === ADD THIS: Projects base directory ===
+        self.PROJECTS_BASE_DIR = r"E:\3D_Tool\projects"
+        os.makedirs(self.PROJECTS_BASE_DIR, exist_ok=True)
         
         # Initialize specific attributes that need different values
         self.start_point = np.array([387211.43846649484, 2061092.3144329898, 598.9991744523196])
@@ -271,13 +285,14 @@ class PointCloudViewer(ApplicationUI):
         self.measurement_button.setText("📏Measurement ▼" if checked else "📏Measurement")
 
     # =======================================================================================================================================
+
     def open_create_project_dialog(self):
         dialog = CreateProjectDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
             project_name = data["project_name"].strip()
             pointcloud_files = data["pointcloud_files"]
-            properties = data["properties"]
+            category = data["category"]
 
             if not project_name:
                 QMessageBox.warning(self, "Error", "Project name is required!")
@@ -287,66 +302,102 @@ class PointCloudViewer(ApplicationUI):
                 QMessageBox.warning(self, "Error", "Please select at least one point cloud file or folder.")
                 return
 
-            # Save project logic (your existing code)
+            # Define base projects directory
+            BASE_PROJECTS_DIR = r"E:\3D_Tool\projects"
+            os.makedirs(BASE_PROJECTS_DIR, exist_ok=True)
+
+            # Create project-specific folder
+            project_folder = os.path.join(BASE_PROJECTS_DIR, project_name)
+            try:
+                os.makedirs(project_folder, exist_ok=False)  # Raises error if already exists
+            except FileExistsError:
+                reply = QMessageBox.question(
+                    self, "Project Exists",
+                    f"A project named '{project_name}' already exists.\nDo you want to overwrite it?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                )
+                if reply == QMessageBox.No:
+                    return
+                # If yes, continue (folder already exists, we'll overwrite config)
+
+            # Prepare project config data
             project_entry = {
                 "project_name": project_name,
-                "pointcloud_files": pointcloud_files,
-                "properties": properties,
-                "created_at": datetime.now().isoformat()
+                "pointcloud_files": pointcloud_files,  # List of full paths
+                "category": category,
+                "created_at": datetime.now().isoformat(),
+                "created_by": self.current_user  # Optional: track who created it
             }
 
+            # Path to project_config.txt inside the project folder
+            config_file_path = os.path.join(project_folder, "project_config.txt")
+
             try:
-                with open(self.PROJECT_FILE, 'a', encoding='utf-8') as f:
-                    json.dump(project_entry, f)
-                    f.write('\n')
-                self.message_text.append(f"Project '{project_name}' created with {len(pointcloud_files)} file(s).")
-                QMessageBox.information(self, "Success", f"Project '{project_name}' created successfully!")
+                with open(config_file_path, 'w', encoding='utf-8') as f:
+                    json.dump(project_entry, f, indent=4)
+                
+                QMessageBox.information(
+                    self, "Success",
+                    f"Project '{project_name}' created successfully!\n\n"
+                    f"Location:\n{project_folder}\n\n"
+                    f"Point cloud files linked: {len(pointcloud_files)} file(s)"
+                )
+
+                self.message_text.append(f"New project created: {project_name}")
+                self.message_text.append(f"   → Folder: {project_folder}")
+                self.message_text.append(f"   → Files linked: {len(pointcloud_files)}")
+
+                # Optional: You can now allow loading this project later
+                # Or auto-load point clouds if desired
+
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to save project:\n{str(e)}")
+                QMessageBox.critical(self, "Error", f"Failed to save project configuration:\n{str(e)}")
+                self.message_text.append(f"Error saving project '{project_name}': {str(e)}")
 
     # =======================================================================================================================================
     def open_new_worksheet_dialog(self):
-        """Open the New Worksheet dialog"""
+        """Open dialog to create a new worksheet and save it properly"""
         dialog = WorksheetNewDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
-
-            # Validate required fields
-            if not data["worksheet_name"] or not data["worksheet_type"]:
-                QMessageBox.warning(self, "Invalid Input", "Worksheet Name and Type are required!")
+            worksheet_name = data["worksheet_name"].strip()
+            
+            if not worksheet_name:
+                QMessageBox.warning(self, "Invalid Name", "Worksheet name cannot be empty!")
                 return
 
-            # Add timestamp
-            data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Create worksheet-specific folder
+            worksheet_folder = os.path.join(self.WORKSHEETS_BASE_DIR, worksheet_name)
+            os.makedirs(worksheet_folder, exist_ok=True)
 
-            # Save to worksheet.txt (append if exists)
+            # Prepare full config data including username and timestamp
+            config_data = {
+                "worksheet_name": worksheet_name,
+                "project_name": data["project_name"],
+                "created_at": datetime.now().isoformat(),
+                "created_by": self.current_user, 
+                "worksheet_type": data.get("worksheet_type", "None"),
+                "worksheet_category": data.get("worksheet_category", "None"),
+                "layer_type": data.get("layer_type", "")
+            }
+
+            # Save config.txt inside the worksheet folder
+            config_path = os.path.join(worksheet_folder, "worksheet_config.txt")
             try:
-                worksheets = []
-                if os.path.exists(self.WORKSHEET_FILE):
-                    with open(self.WORKSHEET_FILE, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            line = line.strip()
-                            if line:
-                                try:
-                                    worksheets.append(json.loads(line))
-                                except:
-                                    continue
-
-                # Avoid duplicates
-                worksheets = [w for w in worksheets if w.get("worksheet_name") != data["worksheet_name"]]
-                worksheets.append(data)
-
-                with open(self.WORKSHEET_FILE, 'w', encoding='utf-8') as f:
-                    for ws in worksheets:
-                        f.write(json.dumps(ws, ensure_ascii=False) + "\n")
-
-                # Update display
-                self.display_current_worksheet(data)
-                self.message_text.append(f"New worksheet saved: {data['worksheet_name']}")
-
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    json.dump(config_data, f, indent=4)
+                self.message_text.append(f"Worksheet '{worksheet_name}' created and saved at:\n{worksheet_folder}")
             except Exception as e:
-                QMessageBox.critical(self, "Save Error", f"Failed to save worksheet:\n{str(e)}")
-                self.message_text.append(f"Error saving worksheet: {str(e)}")
+                QMessageBox.critical(self, "Save Failed", f"Could not save worksheet config:\n{e}")
+                return
+
+            # Update UI to show current worksheet
+            self.current_worksheet_name = worksheet_name
+            self.current_project_name = data["project_name"] if data["project_name"].strip() else None
+            self.current_worksheet_data = config_data.copy()
+            self.display_current_worksheet(config_data)
+
+            QMessageBox.information(self, "Success", f"Worksheet '{worksheet_name}' created successfully!\nSaved in:\n{worksheet_folder}")
 
     # =======================================================================================================================================
     def display_current_worksheet(self, data):
@@ -363,77 +414,192 @@ class PointCloudViewer(ApplicationUI):
         self.worksheet_display.setTitle(f"Active: {data['worksheet_name']}")
 
     # =======================================================================================================================================
-    # OPEN CREATE NEW DESIGN LAYER DIALOG
+    # # OPEN CREATE NEW DESIGN LAYER DIALOG
+    # def open_create_new_design_layer_dialog(self):
+    #     """Open the Design New Layer dialog and configure UI based on selection (2D or 3D)"""
+    #     dialog = DesignNewDialog(self)
+    #     if dialog.exec_() == QDialog.Accepted:
+    #         config = dialog.get_configuration()
+
+    #         dimension = config["dimension"]        # "2D" or "3D"
+    #         ref_type = config["reference_type"]    # "Road", "Bridge", or None
+    #         ref_line = config["reference_line"]    # e.g. "Surface line"
+
+    #         # ALWAYS SHOW BOTTOM SECTION when OK is clicked (whether 2D or 3D)
+    #         self.bottom_section.setVisible(True)
+
+    #         # --- HIDE ALL LINE CONTAINERS FIRST ---
+    #         # Road lines
+    #         self.surface_container.setVisible(False)
+    #         self.construction_container.setVisible(False)
+    #         self.road_surface_container.setVisible(False)
+    #         self.zero_container.setVisible(False)
+
+    #         # Bridge lines
+    #         self.deck_line_container.setVisible(False)
+    #         self.projection_container.setVisible(False)
+    #         self.construction_dots_container.setVisible(False)
+    #         self.bridge_zero_container.setVisible(False)
+
+    #         # --- NOW SHOW BASED ON Road / Bridge SELECTION (regardless of 2D/3D) ---
+    #         if ref_type == "Road":
+    #             # Show Road-related lines
+    #             self.surface_container.setVisible(True)
+    #             self.construction_container.setVisible(True)
+    #             self.road_surface_container.setVisible(True)
+    #             self.zero_container.setVisible(True)
+
+    #             self.message_text.append(f"Design Layer Created: {dimension} - ROAD Mode")
+    #             if ref_line:
+    #                 self.message_text.append(f"Reference Line: {ref_line}")
+
+    #         elif ref_type == "Bridge":
+    #             # Show Bridge-related lines
+    #             self.deck_line_container.setVisible(True)
+    #             self.projection_container.setVisible(True)
+    #             self.construction_dots_container.setVisible(True)
+    #             self.bridge_zero_container.setVisible(True)
+
+    #             self.message_text.append(f"Design Layer Created: {dimension} - BRIDGE Mode")
+    #             if ref_line:
+    #                 self.message_text.append(f"Reference Line: {ref_line}")
+
+    #         else:
+    #             # No Road/Bridge selected — still show bottom section, but no lines
+    #             self.message_text.append(f"Design Layer Created: {dimension} - No reference type selected")
+
+    #         # Always show action buttons when a design session starts
+    #         self.preview_button.setVisible(True)
+    #         self.threed_map_button.setVisible(True)
+    #         self.save_button.setVisible(True)
+
+    #         # Optional: Auto-check zero line for drawing
+    #         if not self.zero_line_set:
+    #             self.zero_line.setChecked(True)
+    #             self.bridge_zero_line.setChecked(True)
+
+    #         # Force redraw
+    #         self.canvas.draw()
+    #         self.vtk_widget.GetRenderWindow().Render()
+
+    #         # Optional: Bring bottom section into view
+    #         QTimer.singleShot(100, lambda: self.bottom_section.raise_())
+
+
     def open_create_new_design_layer_dialog(self):
-        """Open the Design New Layer dialog and configure UI based on selection (2D or 3D)"""
+        """Open the Design New Layer dialog and save config to current worksheet's designs folder"""
+        # First check if there's an active worksheet
+        if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
+            QMessageBox.warning(self, "No Active Worksheet", 
+                                "Please create or open a worksheet first before creating a design layer.")
+            return
+
         dialog = DesignNewDialog(self)
         if dialog.exec_() == QDialog.Accepted:
-            config = dialog.get_configuration()
+            try:
+                config = dialog.get_configuration()
+            except ValueError as e:
+                QMessageBox.warning(self, "Invalid Input", str(e))
+                return
 
-            dimension = config["dimension"]        # "2D" or "3D"
-            ref_type = config["reference_type"]    # "Road", "Bridge", or None
-            ref_line = config["reference_line"]    # e.g. "Surface line"
+            layer_name = config["layer_name"]
+            dimension = config["dimension"]
+            ref_type = config["reference_type"]
+            ref_line = config["reference_line"]
 
-            # ALWAYS SHOW BOTTOM SECTION when OK is clicked (whether 2D or 3D)
+            # === Build path inside current worksheet ===
+            base_designs_path = os.path.join(self.WORKSHEETS_BASE_DIR, self.current_worksheet_name, "designs")
+            layer_folder = os.path.join(base_designs_path, layer_name)
+
+            try:
+                os.makedirs(layer_folder, exist_ok=False)  # Will raise error if exists
+            except FileExistsError:
+                reply = QMessageBox.question(self, "Folder Exists",
+                                             f"A design layer named '{layer_name}' already exists.\n"
+                                             f"Do you want to overwrite it?",
+                                             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if reply == QMessageBox.No:
+                    return
+                # If yes, we continue — folder exists, we'll overwrite config
+
+            # === Prepare full config data with metadata ===
+            full_config = {
+                "layer_name": layer_name,
+                "dimension": dimension,
+                "reference_type": ref_type,
+                "reference_line": ref_line,
+                "project_name": getattr(self, 'current_project_name', 'None'),
+                "worksheet_name": self.current_worksheet_name,
+                "created_by": self.current_user,
+                "created_at": datetime.now().isoformat(),
+            }
+
+            # === Save config file ===
+            config_file_path = os.path.join(layer_folder, "design_layer_config.txt")
+            try:
+                with open(config_file_path, 'w', encoding='utf-8') as f:
+                    json.dump(full_config, f, indent=4)
+
+                QMessageBox.information(self,
+                                        "Success",
+                                        f"Design layer '{layer_name}' created successfully!\n\n"
+                                        f"Location:\n{layer_folder}")
+
+                self.message_text.append(f"New design layer created: {layer_name}")
+                self.message_text.append(f"   → Path: {layer_folder}")
+                self.message_text.append(f"   → Dimension: {dimension}")
+                if ref_type:
+                    self.message_text.append(f"   → Type: {ref_type} ({ref_line or 'No reference'})")
+
+            except Exception as e:
+                QMessageBox.critical(self, "Save Failed", f"Could not save design layer config:\n{str(e)}")
+                self.message_text.append(f"Error saving design layer '{layer_name}': {str(e)}")
+                return
+
+            # === UI Updates (same as before) ===
             self.bottom_section.setVisible(True)
 
-            # --- HIDE ALL LINE CONTAINERS FIRST ---
-            # Road lines
+            # Hide all containers first
             self.surface_container.setVisible(False)
             self.construction_container.setVisible(False)
             self.road_surface_container.setVisible(False)
             self.zero_container.setVisible(False)
-
-            # Bridge lines
             self.deck_line_container.setVisible(False)
             self.projection_container.setVisible(False)
             self.construction_dots_container.setVisible(False)
             self.bridge_zero_container.setVisible(False)
 
-            # --- NOW SHOW BASED ON Road / Bridge SELECTION (regardless of 2D/3D) ---
             if ref_type == "Road":
-                # Show Road-related lines
                 self.surface_container.setVisible(True)
                 self.construction_container.setVisible(True)
                 self.road_surface_container.setVisible(True)
                 self.zero_container.setVisible(True)
-
                 self.message_text.append(f"Design Layer Created: {dimension} - ROAD Mode")
-                if ref_line:
-                    self.message_text.append(f"Reference Line: {ref_line}")
-
             elif ref_type == "Bridge":
-                # Show Bridge-related lines
                 self.deck_line_container.setVisible(True)
                 self.projection_container.setVisible(True)
                 self.construction_dots_container.setVisible(True)
                 self.bridge_zero_container.setVisible(True)
-
                 self.message_text.append(f"Design Layer Created: {dimension} - BRIDGE Mode")
-                if ref_line:
-                    self.message_text.append(f"Reference Line: {ref_line}")
-
             else:
-                # No Road/Bridge selected — still show bottom section, but no lines
                 self.message_text.append(f"Design Layer Created: {dimension} - No reference type selected")
 
-            # Always show action buttons when a design session starts
+            if ref_line:
+                self.message_text.append(f"Reference Line: {ref_line}")
+
+            # Show action buttons
             self.preview_button.setVisible(True)
             self.threed_map_button.setVisible(True)
             self.save_button.setVisible(True)
 
-            # Optional: Auto-check zero line for drawing
+            # Auto-check zero line
             if not self.zero_line_set:
                 self.zero_line.setChecked(True)
-                self.bridge_zero_line.setChecked(True)
+                if hasattr(self, 'bridge_zero_line'):
+                    self.bridge_zero_line.setChecked(True)
 
-            # Force redraw
             self.canvas.draw()
             self.vtk_widget.GetRenderWindow().Render()
-
-            # Optional: Bring bottom section into view
-            QTimer.singleShot(100, lambda: self.bottom_section.raise_())
-
     # =======================================================================================================================================
     def open_measurement_dialog(self):
         """Open the Measurement Configuration Dialog when New is clicked"""
@@ -870,33 +1036,44 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append("Configuration saved!")
 
     # =======================================================================================================================================
+    # =======================================================================================================================================
     def open_existing_worksheet(self):
         dialog = ExistingWorksheetDialog(self)
         if dialog.exec_() == QDialog.Accepted and dialog.selected_worksheet:
             ws = dialog.selected_worksheet
             project_name = ws.get("project_name")
 
+            # Set current worksheet info
+            self.current_worksheet_name = ws['worksheet_name']
+            self.current_project_name = project_name if project_name and project_name.strip() and project_name != "None" else None
+            self.current_worksheet_data = ws.copy()
+
             self.display_current_worksheet(ws)
             self.message_text.append(f"Opened worksheet: {ws['worksheet_name']}")
 
-            if project_name and project_name != "None":
-                # Find project and load point cloud files
-                if os.path.exists(self.PROJECT_FILE):
-                    try:
-                        with open(self.PROJECT_FILE, 'r', encoding='utf-8') as f:
-                            for line in f:
-                                line = line.strip()
-                                if line:
-                                    proj = json.loads(line)
-                                    if proj["project_name"] == project_name:
-                                        files = proj["pointcloud_files"]
-                                        if files:
-                                            self.message_text.append(f"Auto-loading point cloud from project '{project_name}'...")
-                                            self.load_point_cloud_files(files)
-                                        break
-                    except Exception as e:
-                        self.message_text.append(f"Error loading project files: {e}")
+            # === AUTO-LOAD POINT CLOUD FROM LINKED PROJECT ===
+            if self.current_project_name:
+                project_folder = os.path.join(self.PROJECTS_BASE_DIR, self.current_project_name)
+                config_path = os.path.join(project_folder, "project_config.txt")
 
+                if os.path.exists(config_path):
+                    try:
+                        with open(config_path, 'r', encoding='utf-8') as f:
+                            proj_config = json.load(f)
+
+                        files = proj_config.get("pointcloud_files", [])
+                        if files:
+                            self.message_text.append(f"Auto-loading {len(files)} point cloud file(s) from project '{self.current_project_name}'...")
+                            self.load_point_cloud_files(files)
+                        else:
+                            self.message_text.append(f"Project '{self.current_project_name}' found, but no point cloud files linked.")
+
+                    except Exception as e:
+                        self.message_text.append(f"Error reading project config '{config_path}': {str(e)}")
+                else:
+                    self.message_text.append(f"Project folder or config not found:\n{config_path}")
+            else:
+                self.message_text.append("No project linked to this worksheet.")
     # =======================================================================================================================================
     def load_point_cloud_files(self, file_list):
         """Load multiple point cloud files (merge or first one)"""

@@ -128,8 +128,10 @@ class ApplicationUI(QMainWindow):
         self.current_point_labels = []  # For current drawing session
 
 # ---------------------------------------------------------------------------------------------------------------------------
-        self.PROJECT_FILE = "project_config.txt"
-        self.WORKSHEET_FILE = "worksheet.txt"
+        #self.WORKSHEET_FILE = "worksheet.txt"
+
+        self.current_worksheet_name = None
+        self.current_project_name = None
 
         # Worksheet display area (top of left panel)
         self.worksheet_display = QGroupBox("Current Worksheet")

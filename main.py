@@ -9,6 +9,7 @@ from pointcloudviewer import PointCloudViewer
 from login import LoginDialog
 
 
+# main.py (updated)
 def main():
     app = QApplication(sys.argv)
 
@@ -17,12 +18,14 @@ def main():
     if login_dlg.exec_() != LoginDialog.Accepted:
         # User cancelled login
         sys.exit(0)
-    # Login successful → open main application
-    window = PointCloudViewer()
+
+    # Login successful → get username and open main application
+    username = login_dlg.logged_in_username  # This attribute was already set in login.py
+
+    window = PointCloudViewer(username=username)  # Pass username
     window.show()
 
     sys.exit(app.exec_())
-
 
 if __name__ == "__main__":
     main()
