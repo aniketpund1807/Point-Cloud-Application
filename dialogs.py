@@ -9,6 +9,7 @@ import os
 import json
 
 from datetime import datetime
+import glob
 
 # ===========================================================================================================================
 # ** ZERO LINE DIALOG **
@@ -1275,260 +1276,6 @@ class DesignNewDialog(QDialog):
 
 
 # ===========================================================================================================================
-# ** WORKSHEET NEW DIALOG **
-# ===========================================================================================================================
-
-class WorksheetNewDialog(QDialog):
-    """Dialog for creating a new worksheet – loads projects from E:\3D_Tool\projects folder structure."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("New Worksheet")
-        self.setModal(True)
-        self.resize(480, 380)
-
-        # ------------------------------------------------------------------
-        # Beautiful style – consistent with your app theme
-        # ------------------------------------------------------------------
-        self.setStyleSheet("""
-            QDialog {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                            stop:0 #f0e6fa, stop:1 #e6e6fa);
-                border-radius: 18px;
-            }
-            QLabel {
-                color: #2d1b3d;
-                font-weight: 600;
-                font-size: 13px;
-            }
-            QLineEdit, QComboBox {
-                border: 2px solid #BA68C8;
-                border-radius: 8px;
-                padding: 8px;
-                background-color: white;
-                font-size: 13px;
-            }
-            QLineEdit:focus, QComboBox:focus {
-                border: 2px solid #8E24AA;
-                background-color: #F8E8FF;
-            }
-            QComboBox::drop-down {
-                border: 0px;
-            }
-            QComboBox::down-arrow {
-                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM4RTI0QUEiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNyAxMGw1IDUgNS01Ii8+PC9zdmc+);
-                width: 16px;
-                height: 16px;
-            }
-            QGroupBox {
-                border: 2px solid #BA68C8;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-                font-weight: bold;
-                color: #4A148C;
-                background-color: rgba(255, 255, 255, 0.7);
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 8px 0 8px;
-            }
-            QRadioButton {
-                padding: 6px;
-                color: #2d1b3d;
-                font-weight: normal;
-            }
-            QRadioButton::indicator {
-                width: 16px;
-                height: 16px;
-                border-radius: 8px;
-                border: 2px solid #BA68C8;
-            }
-            QRadioButton::indicator:checked {
-                background-color: #8E24AA;
-                border: 2px solid #8E24AA;
-            }
-            QPushButton {
-                border-radius: 20px;
-                padding: 11px;
-                font-weight: bold;
-                min-width: 110px;
-                border: none;
-            }
-            QPushButton#okBtn {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #AB47BC, stop:1 #8E24AA);
-                color: white;
-            }
-            QPushButton#okBtn:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #9C27B0, stop:1 #7B1FA2);
-            }
-            QPushButton#cancelBtn {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #E1BEE7, stop:1 #CE93D8);
-                color: #333;
-            }
-            QPushButton#cancelBtn:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #D1C4E9, stop:1 #BA68C8);
-            }
-        """)
-
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(30, 30, 30, 30)
-        main_layout.setSpacing(20)
-
-        # ------------------------------------------------------------------
-        # Title
-        # ------------------------------------------------------------------
-        title = QLabel("Create New Worksheet")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 19px; font-weight: bold; color: #4A148C; padding: 8px;")
-        main_layout.addWidget(title)
-
-        # ------------------------------------------------------------------
-        # Form fields
-        # ------------------------------------------------------------------
-        form = QGridLayout()
-        form.setHorizontalSpacing(20)
-        form.setVerticalSpacing(18)
-
-        # Worksheet Name
-        form.addWidget(QLabel("Worksheet Name:"), 0, 0)
-        self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("Enter worksheet name")
-        form.addWidget(self.name_edit, 0, 1)
-
-        # Project Name – NOW LOADED FROM E:\3D_Tool\projects\*
-        form.addWidget(QLabel("Project Name:"), 1, 0)
-        self.project_combo = QComboBox()
-        self.project_combo.addItem("None")  # Default
-
-        self.load_projects_from_folders()  # ← Key function
-
-        form.addWidget(self.project_combo, 1, 1)
-
-        # Worksheet Category
-        form.addWidget(QLabel("Worksheet Category:"), 2, 0)
-        self.category_combo = QComboBox()
-        self.category_combo.addItems(["None", "Road", "Bridge", "Other"])
-        form.addWidget(self.category_combo, 2, 1)
-
-        # Worksheet Type
-        form.addWidget(QLabel("Worksheet Type:"), 3, 0)
-        self.type_combo = QComboBox()
-        self.type_combo.addItems(["None", "Design", "Construction", "Measurement"])
-        form.addWidget(self.type_combo, 3, 1)
-
-        # Layer Type (3D / 2D)
-        form.addWidget(QLabel("Layer Type:"), 4, 0)
-        dim_group = QWidget()
-        dim_layout = QHBoxLayout(dim_group)
-        dim_layout.setContentsMargins(0, 0, 0, 0)
-        self.radio_3d = QRadioButton("3D")
-        self.radio_2d = QRadioButton("2D")
-        self.radio_3d.setChecked(True)  # Default to 3D
-
-        dim_layout.addWidget(self.radio_3d)
-        dim_layout.addWidget(self.radio_2d)
-        dim_layout.addStretch()
-        form.addWidget(dim_group, 4, 1)
-
-        main_layout.addLayout(form)
-
-        # ------------------------------------------------------------------
-        # Buttons
-        # ------------------------------------------------------------------
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-
-        ok_btn = QPushButton("OK")
-        ok_btn.setObjectName("okBtn")
-        ok_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(ok_btn)
-
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setObjectName("cancelBtn")
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
-
-        main_layout.addLayout(btn_layout)
-
-    # ----------------------------------------------------------------------
-    # Load all projects from E:\3D_Tool\projects\* folders
-    # ----------------------------------------------------------------------
-    def load_projects_from_folders(self):
-        BASE_PROJECTS_DIR = r"E:\3D_Tool\projects"
-        if not os.path.exists(BASE_PROJECTS_DIR):
-            print("Projects directory not found:", BASE_PROJECTS_DIR)
-            return
-
-        import glob
-
-        # Find all project_config.txt files in subfolders
-        config_files = glob.glob(os.path.join(BASE_PROJECTS_DIR, "*", "project_config.txt"))
-
-        if not config_files:
-            print("No project_config.txt files found in subfolders.")
-            return
-
-        for config_path in config_files:
-            try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)  # Single JSON object per file
-                    project_name = data.get("project_name", "Unknown Project")
-                    self.project_combo.addItem(project_name)
-            except Exception as e:
-                print(f"Error reading {config_path}: {e}")
-
-        # Optional: Sort alphabetically
-        self.project_combo.model().sort(0)
-
-    # ----------------------------------------------------------------------
-    # Return data
-    # ----------------------------------------------------------------------
-    # def get_data(self):
-    #     layer_type = "3D" if self.radio_3d.isChecked() else "2D"
-    #     project_name = self.project_combo.currentText()
-    #     if project_name == "None":
-    #         project_name = ""
-
-    #     return {
-    #         "worksheet_name": self.name_edit.text().strip(),
-    #         "worksheet_type": self.type_combo.currentText(),
-    #         "project_name": project_name,
-    #         "worksheet_category": self.category_combo.currentText(),
-    #         "layer_type": layer_type
-    #     }
-
-    # ----------------------------------------------------------------------
-    # Return data + generate first layer name
-    # ----------------------------------------------------------------------
-    def get_data(self):
-        layer_type = "3D" if self.radio_3d.isChecked() else "2D"
-        project_name = self.project_combo.currentText()
-        if project_name == "None":
-            project_name = ""
-
-        worksheet_type = self.type_combo.currentText()
-        if worksheet_type == "None":
-            worksheet_type = "General"  # fallback
-
-        # Generate first layer name: e.g., Design_2D_Layer_1
-        first_layer_name = f"{worksheet_type}_{layer_type}_Layer_1"
-
-        return {
-            "worksheet_name": self.name_edit.text().strip(),
-            "worksheet_type": worksheet_type,
-            "project_name": project_name,
-            "worksheet_category": self.category_combo.currentText(),
-            "layer_type": layer_type,
-            "first_layer_name": first_layer_name   # ← NEW: for auto-adding layer
-        }
-    
-
-# ===========================================================================================================================
 #                                                ** HELP Dialog Box **
 # ===========================================================================================================================
 class HelpDialog(QDialog):
@@ -1706,14 +1453,6 @@ class ConstructionNewDialog(QDialog):
 # ===========================================================================================================================
 # ** CREATE PROJECT DIALOG - IMPROVED VERSION (Supports File + Folder Selection) **
 # ===========================================================================================================================
-import os
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QComboBox, QTextEdit, QPushButton, QFileDialog,
-    QMessageBox, QGroupBox
-)
-from PyQt5.QtCore import Qt
-
 
 class CreateProjectDialog(QDialog):
     def __init__(self, parent=None):
@@ -2157,3 +1896,373 @@ class ExistingWorksheetDialog(QDialog):
                 return
 
         QMessageBox.warning(self, "Error", "Could not retrieve selected worksheet data.")
+
+
+
+
+# =================================================================================================================================================================
+#                                                                    ** Updated WorksheetNewDialog (Layer Name - No Fallback) **
+# =================================================================================================================================================================
+class WorksheetNewDialog(QDialog):
+    """Multi-page dialog for creating a new worksheet with conditional Baseline Type selection (only for 2D)."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("New Worksheet")
+        self.setModal(True)
+        self.resize(560, 520)
+
+        self.parent = parent  # Reference to main window
+
+        # ------------------------------------------------------------------
+        # Style (consistent with DesignNewDialog)
+        # ------------------------------------------------------------------
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #f0e6fa, stop:1 #e6e6fa);
+                border-radius: 18px;
+            }
+            QLabel {
+                color: #2d1b3d;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QLineEdit, QComboBox {
+                border: 2px solid #BA68C8;
+                border-radius: 8px;
+                padding: 8px;
+                background-color: white;
+                font-size: 13px;
+            }
+            QLineEdit:focus, QComboBox:focus {
+                border: 2px solid #8E24AA;
+                background-color: #F8E8FF;
+            }
+            QGroupBox {
+                border: 2px solid #9C27B0;
+                border-radius: 12px;
+                margin-top: 12px;
+                padding-top: 8px;
+                font-weight: bold;
+                color: #4A148C;
+                background-color: rgba(255, 255, 255, 0.4);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 4px 10px;
+                background-color: #E1BEE7;
+                border-radius: 6px;
+            }
+            QCheckBox {
+                font-weight: 500;
+                spacing: 8px;
+                font-size: 13px;
+            }
+            QRadioButton {
+                padding: 6px;
+                color: #2d1b3d;
+                font-weight: normal;
+            }
+            QPushButton {
+                border-radius: 20px;
+                padding: 11px;
+                font-weight: bold;
+                min-width: 110px;
+                border: none;
+            }
+            QPushButton#nextBtn, QPushButton#okBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #AB47BC, stop:1 #8E24AA);
+                color: white;
+            }
+            QPushButton#nextBtn:hover, QPushButton#okBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #9C27B0, stop:1 #7B1FA2);
+            }
+            QPushButton#backBtn, QPushButton#cancelBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #E1BEE7, stop:1 #CE93D8);
+                color: #333;
+            }
+            QPushButton#backBtn:hover, QPushButton#cancelBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #D1C4E9, stop:1 #BA68C8);
+            }
+        """)
+
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(20, 20, 20, 20)
+        self.main_layout.setSpacing(20)
+
+        # Stacked pages
+        self.page1 = QWidget()
+        self.page2 = QWidget()
+        self.setup_page1()
+        self.setup_page2()
+
+        self.main_layout.addWidget(self.page1)
+        self.main_layout.addWidget(self.page2)
+        self.page2.setVisible(False)
+
+        # Data storage
+        self.reference_type = None
+
+    # ------------------------------------------------------------------
+    # Page 1: Basic worksheet info
+    # ------------------------------------------------------------------
+    def setup_page1(self):
+        layout = QVBoxLayout(self.page1)
+        layout.setSpacing(15)
+
+        title = QLabel("Create New Worksheet")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 19px; font-weight: bold; color: #4A148C; padding: 8px;")
+        layout.addWidget(title)
+
+        form = QVBoxLayout()
+        form.setSpacing(12)
+
+        # Worksheet Name
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("Worksheet Name:"))
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Enter worksheet name")
+        row1.addWidget(self.name_edit)
+        form.addLayout(row1)
+
+        # Project
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("Project Name:"))
+        self.project_combo = QComboBox()
+        self.project_combo.addItem("None")
+        self.load_projects_from_folders()
+        self.project_combo.currentTextChanged.connect(self.on_project_changed)
+        row2.addWidget(self.project_combo)
+        form.addLayout(row2)
+
+        layout.addLayout(form)
+        layout.addStretch()
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        self.next_btn = QPushButton("Next")
+        self.next_btn.setObjectName("nextBtn")
+        self.next_btn.clicked.connect(self.go_to_page2)
+        btn_layout.addWidget(self.next_btn)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("cancelBtn")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+
+    # ------------------------------------------------------------------
+    # Page 2: Layer & Baseline Configuration
+    # ------------------------------------------------------------------
+    def setup_page2(self):
+        layout = QVBoxLayout(self.page2)
+        layout.setSpacing(18)
+
+        title = QLabel("Worksheet Configuration")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 19px; font-weight: bold; color: #4A148C; padding: 8px;")
+        layout.addWidget(title)
+
+        # === Enter Layer Name ===
+        layer_name_row = QHBoxLayout()
+        layer_name_row.addWidget(QLabel("Enter Layer Name:"))
+        self.layer_name_edit = QLineEdit()
+        self.layer_name_edit.setPlaceholderText("e.g. Base Layer, Design Layer 1")
+        layer_name_row.addWidget(self.layer_name_edit)
+        layout.addLayout(layer_name_row)
+
+        # === Dimension ===
+        dim_group = QGroupBox("Layer Type")
+        dim_layout = QVBoxLayout(dim_group)
+        self.radio_3d = QRadioButton("3D (Measurement)")
+        self.radio_2d = QRadioButton("2D (Design)")
+        dim_layout.addWidget(self.radio_3d)
+        dim_layout.addWidget(self.radio_2d)
+        layout.addWidget(dim_group)
+
+        # === Baseline Type (Road / Bridge / Other) - Only visible for 2D ===
+        self.baseline_group = QGroupBox("Baseline Type")
+        baseline_layout = QVBoxLayout(self.baseline_group)
+
+        self.cb_road = QCheckBox("Road")
+        self.cb_bridge = QCheckBox("Bridge")
+        self.cb_other = QCheckBox("Other")
+
+        # Mutually exclusive between Road and Bridge
+        def toggle_exclusive(checked_cb):
+            if checked_cb.isChecked():
+                other = self.cb_bridge if checked_cb == self.cb_road else self.cb_road
+                other.blockSignals(True)
+                other.setChecked(False)
+                other.blockSignals(False)
+
+        self.cb_road.stateChanged.connect(lambda s: toggle_exclusive(self.cb_road) if s else None)
+        self.cb_bridge.stateChanged.connect(lambda s: toggle_exclusive(self.cb_bridge) if s else None)
+
+        baseline_layout.addWidget(self.cb_road)
+        baseline_layout.addWidget(self.cb_bridge)
+        baseline_layout.addWidget(self.cb_other)
+
+        layout.addWidget(self.baseline_group)
+        self.baseline_group.setVisible(False)
+
+        # === Point Cloud Selection ===
+        pc_group = QGroupBox("Select Point Cloud File (optional)")
+        pc_layout = QHBoxLayout(pc_group)
+        self.pc_combo = QComboBox()
+        self.pc_combo.addItem("No file selected")
+        pc_layout.addWidget(QLabel("File:"))
+        pc_layout.addWidget(self.pc_combo, 1)
+        layout.addWidget(pc_group)
+
+        # Connect dimension change
+        self.radio_3d.toggled.connect(self.on_dimension_changed)
+        self.radio_2d.toggled.connect(self.on_dimension_changed)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        back_btn = QPushButton("Back")
+        back_btn.setObjectName("backBtn")
+        back_btn.clicked.connect(self.go_to_page1)
+        btn_layout.addWidget(back_btn)
+
+        ok_btn = QPushButton("OK")
+        ok_btn.setObjectName("okBtn")
+        ok_btn.clicked.connect(self.final_accept)
+        btn_layout.addWidget(ok_btn)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("cancelBtn")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+
+    # ------------------------------------------------------------------
+    # Handlers
+    # ------------------------------------------------------------------
+    def go_to_page2(self):
+        if not self.name_edit.text().strip():
+            QMessageBox.warning(self, "Input Required", "Please enter a worksheet name.")
+            return
+        self.page1.setVisible(False)
+        self.page2.setVisible(True)
+        self.on_project_changed()
+        self.on_dimension_changed()
+
+    def go_to_page1(self):
+        self.page2.setVisible(False)
+        self.page1.setVisible(True)
+
+    def on_dimension_changed(self):
+        is_2d = self.radio_2d.isChecked()
+        self.baseline_group.setVisible(is_2d)
+
+    def on_project_changed(self):
+        project_name = self.project_combo.currentText()
+        self.pc_combo.clear()
+        self.pc_combo.addItem("No file selected")
+
+        if project_name == "None":
+            self.pc_combo.setEnabled(False)
+            return
+
+        project_folder = os.path.join(r"E:\3D_Tool\projects", project_name)
+        config_path = os.path.join(project_folder, "project_config.txt")
+
+        if not os.path.exists(config_path):
+            self.pc_combo.addItem("Project config not found")
+            self.pc_combo.setEnabled(False)
+            return
+
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            files = data.get("pointcloud_files", [])
+            if not files:
+                self.pc_combo.addItem("No point cloud files linked")
+            else:
+                for f in files:
+                    self.pc_combo.addItem(os.path.basename(f), f)
+                self.pc_combo.setEnabled(True)
+        except Exception as e:
+            self.pc_combo.addItem(f"Error reading config: {e}")
+            self.pc_combo.setEnabled(False)
+
+    def load_projects_from_folders(self):
+        import glob
+        BASE_DIR = r"E:\3D_Tool\projects"
+        if not os.path.exists(BASE_DIR):
+            return
+        config_files = glob.glob(os.path.join(BASE_DIR, "*", "project_config.txt"))
+        for cfg in config_files:
+            try:
+                with open(cfg, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    name = data.get("project_name", "Unknown")
+                    self.project_combo.addItem(name)
+            except:
+                pass
+        self.project_combo.model().sort(0)
+
+    # ------------------------------------------------------------------
+    # Final accept
+    # ------------------------------------------------------------------
+    def final_accept(self):
+        worksheet_name = self.name_edit.text().strip()
+        if not worksheet_name:
+            QMessageBox.warning(self, "Error", "Worksheet name is required.")
+            return
+
+        if self.radio_2d.isChecked():
+            if self.cb_road.isChecked():
+                category = "Road"
+            elif self.cb_bridge.isChecked():
+                category = "Bridge"
+            elif self.cb_other.isChecked():
+                category = "Other"
+            else:
+                category = "None"
+        else:
+            category = "None"
+
+        self.reference_type = category
+        self.accept()
+
+    # ------------------------------------------------------------------
+    # get_data() – returns all needed info
+    # ------------------------------------------------------------------
+    def get_data(self):
+        worksheet_name = self.name_edit.text().strip()
+        project_name = self.project_combo.currentText() if self.project_combo.currentText() != "None" else ""
+        dimension = "3D" if self.radio_3d.isChecked() else "2D"
+        worksheet_type = "Measurement" if dimension == "3D" else "Design"
+
+        # Use exactly what user entered — no fallback
+        layer_name = self.layer_name_edit.text().strip()
+
+        selected_pc_path = self.pc_combo.currentData()
+        point_cloud_file = selected_pc_path if selected_pc_path else None
+
+        return {
+            "worksheet_name": worksheet_name,
+            "project_name": project_name,
+            "worksheet_type": worksheet_type,
+            "worksheet_category": self.reference_type or "None",
+            "dimension": dimension,
+            "initial_layer_name": layer_name,  # Exactly as entered by user
+            "reference_type": self.reference_type,
+            "reference_line": None,
+            "point_cloud_file": point_cloud_file
+        }

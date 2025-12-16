@@ -127,8 +127,12 @@ class ApplicationUI(QMainWindow):
         self.point_labels = []  # For storing point label annotations
         self.current_point_labels = []  # For current drawing session
 
-        self.three_D_layers_layout = None   # Will hold QVBoxLayout for 3D layers
-        self.two_D_layers_layout = None     # Will hold QVBoxLayout for 2D layers
+        self.three_D_layers_layout = None
+        self.two_D_layers_layout = None
+
+        # ADD THESE TWO LINES
+        self.three_D_frame = None   # Will hold the 3D Layers frame
+        self.two_D_frame = None     # Will hold the 2D Layers frame
 
 # ---------------------------------------------------------------------------------------------------------------------------
         #self.WORKSHEET_FILE = "worksheet.txt"
@@ -404,6 +408,17 @@ class ApplicationUI(QMainWindow):
         left_section.setMaximumWidth(420)
         left_layout = QVBoxLayout(left_section)
 
+        # ------------------------------------------------------------------
+        # NEW: Mode Banner (Measurement / Design) - TOP MOST in left panel
+        # ------------------------------------------------------------------
+        self.mode_banner = QLabel("No Mode Active")
+        self.mode_banner.setAlignment(Qt.AlignCenter)
+        self.mode_banner.setVisible(False)  # Hidden until worksheet is loaded
+        left_layout.addWidget(self.mode_banner)
+
+        # Add worksheet display BELOW the mode banner
+        left_layout.insertWidget(1, self.worksheet_display)  # You already have this line — keep it
+
         # ---------------------------------------------------------------------------
         # Merger Layers Section
         # ---------------------------------------------------------------------------
@@ -430,16 +445,13 @@ class ApplicationUI(QMainWindow):
         """)
         merger_layout.addWidget(merger_title)
         merger_layout.addStretch()
-
-        # Add worksheet display at the very top of left section
-        left_layout.insertWidget(0, self.worksheet_display)
-
+        
         # --------------------------------------------------------------------------- 
         # 3D Layers Section
         # ---------------------------------------------------------------------------
-        three_D_frame = QFrame()
-        three_D_frame.setFrameStyle(QFrame.Box | QFrame.Raised)
-        three_D_frame.setStyleSheet("""
+        self.three_D_frame = QFrame()
+        self.three_D_frame.setFrameStyle(QFrame.Box | QFrame.Raised)
+        self.three_D_frame.setStyleSheet("""
             QFrame { 
                 border: 2px solid #42A5F5; 
                 border-radius: 10px; 
@@ -447,7 +459,7 @@ class ApplicationUI(QMainWindow):
                 margin: 5px 10px;
             }
         """)
-        three_D_layout = QVBoxLayout(three_D_frame)
+        three_D_layout = QVBoxLayout(self.three_D_frame)
 
         three_D_title = QLabel("3D Layers")
         three_D_title.setAlignment(Qt.AlignCenter)
@@ -479,9 +491,9 @@ class ApplicationUI(QMainWindow):
         # --------------------------------------------------------------------------- 
         # 2D Layers Section
         # ---------------------------------------------------------------------------
-        two_D_frame = QFrame()
-        two_D_frame.setFrameStyle(QFrame.Box | QFrame.Raised)
-        two_D_frame.setStyleSheet("""
+        self.two_D_frame = QFrame()
+        self.two_D_frame.setFrameStyle(QFrame.Box | QFrame.Raised)
+        self.two_D_frame.setStyleSheet("""
             QFrame { 
                 border: 2px solid #66BB6A; 
                 border-radius: 10px; 
@@ -489,7 +501,7 @@ class ApplicationUI(QMainWindow):
                 margin: 5px 10px;
             }
         """)
-        two_D_layout = QVBoxLayout(two_D_frame)
+        two_D_layout = QVBoxLayout(self.two_D_frame)
 
         two_D_title = QLabel("2D Layers")
         two_D_title.setAlignment(Qt.AlignCenter)
@@ -520,8 +532,8 @@ class ApplicationUI(QMainWindow):
 
         # === ADD BOTH FRAMES TO LEFT PANEL ===
         #left_layout.addWidget(merger_frame)
-        left_layout.addWidget(three_D_frame)
-        left_layout.addWidget(two_D_frame)
+        left_layout.addWidget(self.three_D_frame)
+        left_layout.addWidget(self.two_D_frame)
 
         # Optional: Add stretch at bottom so layers stay at top
         left_layout.addStretch()
@@ -933,7 +945,7 @@ class ApplicationUI(QMainWindow):
             
             return container, checkbox, text_label, pencil_button
 
-        # Create checkbox rows
+        # # Create checkbox rows
         # Zero Line
         self.zero_container, self.zero_line, zero_label, self.zero_pencil = create_line_checkbox_with_pencil(
             "Zero Line",
@@ -946,14 +958,35 @@ class ApplicationUI(QMainWindow):
                 font-size: 14px;
                 font-weight: bold;
             }
-            QCheckBox:checked {
-                color: purple;
-            }
         """)
         self.zero_container.setVisible(False)
+
+        # Connect state change → change label text color to purple when checked
+        self.zero_line.stateChanged.connect(lambda state: zero_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: purple;
+            }
+        """ if state == Qt.Checked else """
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: #000000;
+            }
+        """))
         # self.zero_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'zero'))
         # self.zero_pencil.clicked.connect(self.edit_zero_line)
         line_layout.addWidget(self.zero_container)
+
+        # self.zero_container.setVisible(False)
+ 
 
         # Surface Line
         self.surface_container, self.surface_baseline, surface_label, surface_pencil = create_line_checkbox_with_pencil(
@@ -967,12 +1000,29 @@ class ApplicationUI(QMainWindow):
                 font-size: 14px;
                 font-weight: bold;
             }
-            QCheckBox:checked {
-                color: green;
-            }
         """)
         self.surface_container.setVisible(False)
-        # self.surface_baseline.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'surface'))
+
+        self.surface_baseline.stateChanged.connect(lambda state: surface_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: green;
+            }
+        """ if state == Qt.Checked else """
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: #000000;
+            }
+        """))
+
         line_layout.addWidget(self.surface_container)
 
         # Construction Line
@@ -987,12 +1037,29 @@ class ApplicationUI(QMainWindow):
                 font-size: 14px;
                 font-weight: bold;
             }
-            QCheckBox:checked {
-                color: red;
-            }
         """)
         self.construction_container.setVisible(False)
-        # self.construction_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'construction'))
+
+        self.construction_line.stateChanged.connect(lambda state: construction_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: red;
+            }
+        """ if state == Qt.Checked else """
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: #000000;
+            }
+        """))
+
         line_layout.addWidget(self.construction_container)
 
         # Road Surface Line
@@ -1007,12 +1074,29 @@ class ApplicationUI(QMainWindow):
                 font-size: 14px;
                 font-weight: bold;
             }
-            QCheckBox:checked {
-                color: blue;
-            }
         """)
         self.road_surface_container.setVisible(False)
-        # self.road_surface_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'road_surface'))
+
+        self.road_surface_line.stateChanged.connect(lambda state: road_surface_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: blue;
+            }
+        """ if state == Qt.Checked else """
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: #000000;
+            }
+        """))
+
         line_layout.addWidget(self.road_surface_container)
 
         # Bridge-specific Zero Line
@@ -1027,13 +1111,29 @@ class ApplicationUI(QMainWindow):
                 font-size: 14px;
                 font-weight: bold;
             }
-            QCheckBox:checked {
-                color: purple;
-            }
         """)
         self.bridge_zero_container.setVisible(False)
-        # self.bridge_zero_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'zero'))
-        # self.bridge_zero_pencil.clicked.connect(self.edit_zero_line)
+
+        self.bridge_zero_line.stateChanged.connect(lambda state: bridge_zero_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: purple;
+            }
+        """ if state == Qt.Checked else """
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: #000000;
+            }
+        """))
+
         line_layout.addWidget(self.bridge_zero_container)
 
         # Projection Line
@@ -1042,18 +1142,35 @@ class ApplicationUI(QMainWindow):
             "Shows the projection elevation profile",
             'projection_line'
         )
-        self.projection_container.setStyleSheet("""
+        self.projection_line.setStyleSheet("""
             QCheckBox {
                 color: black;
                 font-size: 14px;
                 font-weight: bold;
             }
-            QCheckBox:checked {
-                color: blue;
-            }
         """)
         self.projection_container.setVisible(False)
-        # self.projection_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'projection_line'))
+
+        self.projection_line.stateChanged.connect(lambda state: projection_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: green;
+            }
+        """ if state == Qt.Checked else """
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: #000000;
+            }
+        """))
+
         line_layout.addWidget(self.projection_container)
 
         # Construction Dots Line
@@ -1068,13 +1185,29 @@ class ApplicationUI(QMainWindow):
                 font-size: 14px;
                 font-weight: bold;
             }
-            QCheckBox:checked {
-                color: red;
-            }
         """)
         self.construction_dots_container.setVisible(False)
-        # self.construction_dots_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'construction_dots'))
-        # self.construction_dots_pencil.clicked.connect(self.edit_construction_dots_line)
+
+        self.construction_dots_line.stateChanged.connect(lambda state: construction_dots_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: red;
+            }
+        """ if state == Qt.Checked else """
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: #000000;
+            }
+        """))
+
         line_layout.addWidget(self.construction_dots_container)
 
         # Deck Line
@@ -1089,13 +1222,29 @@ class ApplicationUI(QMainWindow):
                 font-size: 14px;
                 font-weight: bold;
             }
-            QCheckBox:checked {
-                color: blue;
-            }
         """)
         self.deck_line_container.setVisible(False)
-        # self.deck_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'deck_line'))
-        # self.deck_pencil.clicked.connect(self.edit_deck_line)
+
+        self.deck_line.stateChanged.connect(lambda state: deck_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: blue;
+            }
+        """ if state == Qt.Checked else """
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: #000000;
+            }
+        """))
+
         line_layout.addWidget(self.deck_line_container)
 
         # ==================== MATERIAL LINE (NEW) ====================
