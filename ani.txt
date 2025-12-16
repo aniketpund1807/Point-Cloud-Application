@@ -8,3 +8,8 @@
             "🏗 : Construction"
             "📏: Measurement"
             "⚙ : Settings"
+
+
+
+I have the above code in that i want to make some changes such as when user clicked on the 'curve' button at that time open the curve
+dialog box user enter the details of that            

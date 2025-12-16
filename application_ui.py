@@ -1370,6 +1370,7 @@ class ApplicationUI(QMainWindow):
         self.canvas.draw()
         self.figure.tight_layout()
 
+
         # ---------------------------------------------------------------------
         # Zoom Controls Toolbar - SIMPLIFIED WORKING VERSION
         # ---------------------------------------------------------------------

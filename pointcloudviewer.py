@@ -40,6 +40,23 @@ class PointCloudViewer(ApplicationUI):
         self.current_project_name = None     # <-- Important
         self.current_worksheet_data = {}
 
+        # Curve-related attributes
+        self.curve_active = False
+        self.curve_start_x = None
+        self.curve_annotation = None        # First/main curve label (yellow box)
+        self.curve_arrow_annotation = None
+        self.curve_pick_id = None
+        self.curve_labels = []              # Stores ALL "5.0° - I" labels on top (including intermediates)
+        self.current_curve_text = ""        # Stores the text like "5.0° - I"
+
+
+        # NEW: storage for 3D curve actors (so we can clear them later)
+        self.curve_3d_actors = []          # list of vtkActor for the yellow arcs
+        self.curve_start_point_3d = None   # world coordinate of the point where curve started
+        self.curve_start_chainage = None   # distance along zero line at start
+        # NEW: 3D curve support
+        self.surface_line_3d_points = []
+
         # Define worksheet base directory
         self.WORKSHEETS_BASE_DIR = r"E:\3D_Tool\user\worksheets"
         os.makedirs(self.WORKSHEETS_BASE_DIR, exist_ok=True)
@@ -2073,201 +2090,322 @@ class PointCloudViewer(ApplicationUI):
         #     self.message_text.append(f"Deck Line Config: Thickness: {config['thickness']}, Material: {config['material']}")
             # Add further logic here if needed (e.g., apply deck line settings)
 
-    # =======================================================================================================================================
-    # CURVE BUTTON HANDLER
+    # =========================================================================================================================================================
+    # # CURVE BUTTON HANDLER
     def on_curve_button_clicked(self, event=None):
-        """
-        Handles:
-        - Button click: if curve active → ask to complete, else → open dialog to add new
-        - Annotation click (event passed): → ONLY edit (never complete)
-        """
-        # CASE 1: Clicked on annotation → ONLY edit, never complete
-        if event is not None and hasattr(event, 'artist') and event.artist == self.curve_annotation:
-            # Reopen dialog with current values for editing
-            dialog = CurveDialog(self)
-            dialog.outer_checkbox.setChecked(self.current_curve_config['outer_curve'])
-            dialog.inner_checkbox.setChecked(self.current_curve_config['inner_curve'])
-            dialog.angle_edit.setText(f"{self.current_curve_config['angle']:.1f}")
-
-            if dialog.exec_() != QDialog.Accepted:
-                return
-
-            config = dialog.get_configuration()
-            angle = config['angle']
-            if angle <= 0:
-                QMessageBox.warning(self, "Invalid Angle", "Please enter an angle greater than 0.")
-                return
-
-            # Update config
-            self.current_curve_config = config
-            outer = config['outer_curve']
-            inner = config['inner_curve']
-            curve_type = "O&I" if outer and inner else ("O" if outer else ("I" if inner else ""))
-            display_text = f"{angle:.1f}° - {curve_type}" if curve_type else f"{angle:.1f}°"
-
-            # Update annotation text
-            self.curve_annotation.set_text(display_text)
-            self.preview_button.setText(f"Curve ({display_text})")
-
-            # Update chainage message
-            try:
-                ticks = self.ax.get_xticks()
-                labels = [lbl.get_text() for lbl in self.ax.get_xticklabels()]
-                idx = np.argmin(np.abs(ticks - self.curve_annotation_x_pos))
-                chainage = labels[idx]
-            except:
-                chainage = "Unknown"
-
-            self.message_text.append(f"Curve updated to '{display_text}' at chainage: {chainage}")
-            self.canvas.draw()
-            self.figure.tight_layout()
+        """Handle Curve button and annotation clicks"""
+        # Clicked on any curve label → edit
+        if event is not None and hasattr(event, 'artist') and event.artist in self.curve_labels:
+            self.edit_current_curve()
             return
 
-        # CASE 2: Button clicked (not annotation)
-        # If curve is active → ask to complete
+        # Curve active → ask to complete
         if self.curve_active:
             reply = QMessageBox.question(
                 self,
                 "Complete Curve",
-                "Do you want to complete this curve?\n",
+                "Do you want to complete the current curve segment?\n\n"
+                "The curve labels will remain on the graph.",
                 QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                QMessageBox.Yes
             )
             if reply == QMessageBox.Yes:
                 self.complete_current_curve()
             return
 
-        # CASE 3: No curve active → create new one
+        # Start new curve
+        self.start_new_curve()
+
+
+# =========================================================================================================================================================
+    def start_new_curve(self):
+        """Open dialog and start adding curve labels from current point onward"""
         dialog = CurveDialog(self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        # Extract full config from dialog
+        config = dialog.get_configuration()
+
+        # Validate angle
+        if config['angle'] <= 0:
+            QMessageBox.warning(self, "Invalid Angle", "Please enter an angle greater than 0.")
+            return
+
+        # Get last surface point X
+        last_x = self.get_last_surface_x()
+        if last_x is None:
+            QMessageBox.critical(self, "Error", "Draw at least one point on Surface Line first.")
+            return
+        
+# --------------------------------------------------------
+        # NEW: convert chainage → real 3D point (the actual clicked surface point)
+        # Find the surface point that has this chainage
+        found = False
+        for line_type in ['surface']:
+            for polyline in reversed(self.line_types[line_type]['polylines']):  # newest first
+                for dist, rel_z in reversed(polyline):
+                    if abs(dist - last_x) < 0.5:  # small tolerance
+                        t = dist / self.total_distance
+                        dir_vec = self.zero_end_point - self.zero_start_point
+                        pos = self.zero_start_point + t * dir_vec
+                        pos[2] = self.zero_start_z + rel_z
+                        self.curve_start_point_3d = pos.copy()
+                        found = True
+                        break
+                if found:
+                    break
+            if found:
+                break
+
+        if not found:
+            # fallback – just use zero line height
+            t = last_x / self.total_distance
+            dir_vec = self.zero_end_point - self.zero_start_point
+            pos = self.zero_start_point + t * dir_vec
+            pos[2] = self.zero_start_z
+            self.curve_start_point_3d = pos.copy()
+# ---------------------------------------------------------------
+
+        # === START CURVE MODE ===
+        self.curve_active = True
+        self.curve_start_x = last_x
+
+        # Store config for auto-labeling new points during drawing
+        self.current_curve_config = config
+
+        # Clear any previous curve labels
+        self.clear_curve_labels()
+
+        # Add first label using the full config from dialog
+        self.add_curve_label_at_x(last_x, config)
+
+        # Format display text for button
+        outer = config['outer_curve']
+        inner = config['inner_curve']
+        curve_type = "O&I" if outer and inner else ("O" if outer else ("I" if inner else ""))
+        display_text = f"{config['angle']:.1f}° - {curve_type}" if curve_type else f"{config['angle']:.1f}°"
+
+        # Update Curve button appearance
+        self.preview_button.setText(f"Curve ({display_text})")
+        self.preview_button.setStyleSheet("""
+            QPushButton { 
+                background-color: #FF5722; 
+                color: white; 
+                padding: 12px; 
+                border-radius: 6px;
+                font-size: 15px; 
+                font-weight: bold; 
+            }
+            QPushButton:hover { background-color: #F57C00; }
+        """)
+
+        # Log in message area
+        chainage = self.get_chainage_label(last_x)
+        self.message_text.append(f"Curve started: '{display_text}' at chainage {chainage}")
+        self.message_text.append("Every new Surface point will now get this curve label at the top.")
+        self.message_text.append("Click any curve label to edit it individually.")
+        self.message_text.append("Click 'Curve' button again to finish the segment.")
+
+        self.canvas.draw_idle()
+
+# ==============================================================================================================================================================
+    def add_curve_label_at_x(self, x, config=None):
+        """
+        Add a curve label at position x.
+        config is a dict: {'angle': 5.0, 'outer_curve': True, 'inner_curve': False}
+        If None, uses default from current_curve_text
+        """
+        if config is None:
+            # Extract from current text if available
+            # Fallback to empty
+            angle = 5.0
+            outer = False
+            inner = False
+            if self.current_curve_text:
+                try:
+                    parts = self.current_curve_text.replace('°', '').split(' - ')
+                    angle = float(parts[0])
+                    type_part = parts[1] if len(parts) > 1 else ""
+                    outer = 'O' in type_part
+                    inner = 'I' in type_part
+                except:
+                    angle = 5.0
+                    outer = False
+                    inner = False
+            config = {'angle': angle, 'outer_curve': outer, 'inner_curve': inner}
+
+        # Format display text
+        curve_type = "O&I" if config['outer_curve'] and config['inner_curve'] else \
+                     ("O" if config['outer_curve'] else ("I" if config['inner_curve'] else ""))
+        display_text = f"{config['angle']:.1f}° - {curve_type}" if curve_type else f"{config['angle']:.1f}°"
+
+        # Create small label like construction dots
+        label = self.ax.text(
+            x, 1.02,
+            display_text,
+            transform=self.ax.get_xaxis_transform(),
+            ha='center', va='bottom',
+            fontsize=9,
+            fontweight='bold',
+            color='darkred',
+            bbox=dict(
+                boxstyle="round,pad=0.4",
+                facecolor="yellow",
+                edgecolor="red",
+                linewidth=1.8,
+                alpha=0.9
+            ),
+            zorder=100,
+            picker=True
+        )
+
+        # Store both artist and its config
+        self.curve_labels.append((label, config))
+
+        # Reconnect picker
+        if self.curve_pick_id:
+            self.canvas.mpl_disconnect(self.curve_pick_id)
+
+        def on_pick(ev):
+            # Find which label was clicked
+            for artist, cfg in self.curve_labels:
+                if ev.artist == artist:
+                    self.edit_individual_curve_label(artist, cfg)
+                    break
+
+        self.curve_pick_id = self.canvas.mpl_connect('pick_event', on_pick)
+
+# ===========================================================================================================================================================
+    def edit_individual_curve_label(self, label_artist, current_config):
+        """Open dialog to edit ONE specific curve label"""
+        dialog = CurveDialog(self)
+
+        # Pre-fill with current values
+        dialog.angle_edit.setText(f"{current_config['angle']:.1f}")
+        dialog.outer_checkbox.setChecked(current_config['outer_curve'])
+        dialog.inner_checkbox.setChecked(current_config['inner_curve'])
+
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        new_config = dialog.get_configuration()
+        new_angle = new_config['angle']
+        if new_angle <= 0:
+            QMessageBox.warning(self, "Invalid Angle", "Angle must be greater than 0.")
+            return
+
+        # Format new display text
+        outer = new_config['outer_curve']
+        inner = new_config['inner_curve']
+        curve_type = "O&I" if outer and inner else ("O" if outer else ("I" if inner else ""))
+        new_text = f"{new_angle:.1f}° - {curve_type}" if curve_type else f"{new_angle:.1f}°"
+
+        # Update only this label's text
+        label_artist.set_text(new_text)
+
+        # Update stored config for this label
+        for i, (artist, cfg) in enumerate(self.curve_labels):
+            if artist == label_artist:
+                self.curve_labels[i] = (artist, new_config)
+                break
+
+        self.message_text.append(f"Updated curve label to: {new_text}")
+        self.canvas.draw_idle()
+
+# ===========================================================================================================================================================
+    def edit_current_curve(self):
+        """Edit curve angle/type – updates all existing labels"""
+        if not self.curve_active:
+            return
+
+        dialog = CurveDialog(self)
+        # Pre-fill current values (you can extract from self.current_curve_text if needed)
+        # For simplicity, just open fresh – user can re-enter
         if dialog.exec_() != QDialog.Accepted:
             return
 
         config = dialog.get_configuration()
         angle = config['angle']
         if angle <= 0:
-            QMessageBox.warning(self, "Invalid Angle", "Please enter an angle greater than 0.")
+            QMessageBox.warning(self, "Invalid", "Angle must be > 0")
             return
 
         outer = config['outer_curve']
         inner = config['inner_curve']
         curve_type = "O&I" if outer and inner else ("O" if outer else ("I" if inner else ""))
-        display_text = f"{angle:.1f}° - {curve_type}" if curve_type else f"{angle:.1f}°"
+        new_text = f"{angle:.1f}° - {curve_type}" if curve_type else f"{angle:.1f}°"
 
-        # Remove old annotation if any (shouldn't be, but safe)
-        if self.curve_annotation:
-            self.curve_annotation.remove()
-            self.curve_annotation = None
-        if self.curve_arrow_annotation:
-            self.curve_arrow_annotation.remove()
-            self.curve_arrow_annotation = None
+        # Update stored text
+        self.current_curve_text = new_text
 
-        # Find last surface point
-        last_x = None
-        if 'surface' in self.line_types and self.line_types['surface']['polylines']:
-            last_poly = self.line_types['surface']['polylines'][-1]
-            if last_poly:
-                last_x = last_poly[-1][0]
-        elif self.active_line_type == 'surface' and len(self.current_points) > 0:
-            last_x = self.current_points[-1][0]
-        if last_x is None:
-            for artist in self.ax.lines:
-                color = artist.get_color()
-                if str(color) in ['green', '(0.0, 1.0, 0.0, 1.0)', 'g']:
-                    xdata = artist.get_xdata()
-                    if len(xdata) > 0:
-                        last_x = xdata[-1]
-                        break
-
-        if last_x is None or not self.zero_line_set:
-            QMessageBox.critical(self, "Error", "No Surface Line found!\n\nPlease draw a Surface Line first.")
-            return
-
-        # Save state
-        self.current_curve_config = config
-        self.curve_annotation_x_pos = last_x
-        self.curve_active = True
-
-        # Create annotation (clickable)
-        self.curve_annotation = self.ax.annotate(
-            display_text,
-            xy=(last_x, self.ax.get_ylim()[1]),
-            xytext=(0, 25), textcoords="offset points",
-            ha='center', va='bottom',
-            bbox=dict(boxstyle="round,pad=0.7", fc="yellow", ec="black", lw=2.5, alpha=0.98),
-            fontsize=14, fontweight='bold', color='darkred', zorder=100,
-            picker=True
-        )
-        self.curve_arrow_annotation = self.ax.annotate(
-            '', xy=(last_x, self.ax.get_ylim()[1] - 0.5),
-            xytext=(last_x, self.ax.get_ylim()[1]),
-            arrowprops=dict(arrowstyle='->', color='red', lw=3.5),
-            ha='center', zorder=99
-        )
-
-        # Connect picker only if not already connected
-        if not self.curve_pick_id:
-            def on_pick(event):
-                if event.artist == self.curve_annotation:
-                    self.on_curve_button_clicked(event)
-            self.curve_pick_id = self.canvas.mpl_connect('pick_event', on_pick)
+        # Update ALL existing curve labels
+        for label in self.curve_labels:
+            label.set_text(new_text)
 
         # Update button
-        self.preview_button.setText(f"Curve ({display_text})")
-        self.preview_button.setStyleSheet("""
-            QPushButton { background-color: #4CAF50; color: white; border: none;
-                          padding: 10px; border-radius: 5px; font-size: 14px; font-weight: bold; }
-            QPushButton:hover { background-color: #45a049; }
-            QPushButton:pressed { background-color: #3d8b40; }
-        """)
+        self.preview_button.setText(f"Curve ({new_text})")
 
-        # Show chainage
-        try:
-            ticks = self.ax.get_xticks()
-            labels = [lbl.get_text() for lbl in self.ax.get_xticklabels()]
-            idx = np.argmin(np.abs(ticks - last_x))
-            chainage = labels[idx]
-        except:
-            chainage = "Unknown"
+        self.message_text.append(f"Curve updated to: {new_text}")
+        self.canvas.draw_idle()
 
-        self.message_text.append(f"Curve '{display_text}' added at chainage: {chainage}")
-        self.canvas.draw()
-        self.figure.tight_layout()
-
-    # -------------------------------------------------
-    # COMPLETE CURRENT CURVE (called only when user confirms via button)
-    # -------------------------------------------------
+# ===========================================================================================================================================================
     def complete_current_curve(self):
+        """End curve mode – keep all labels"""
         if not self.curve_active:
             return
 
-        if self.curve_annotation:
-            self.curve_annotation.remove()
-            self.curve_annotation = None
-        if self.curve_arrow_annotation:
-            self.curve_arrow_annotation.remove()
-            self.curve_arrow_annotation = None
-        if self.curve_pick_id:
-            self.canvas.mpl_disconnect(self.curve_pick_id)
-            self.curve_pick_id = None
-
         self.curve_active = False
-        self.curve_annotation_x_pos = None
-        self.current_curve_config = {'outer_curve': False, 'inner_curve': False, 'angle': 0.0}
+        self.curve_start_x = None
 
         # Reset button
         self.preview_button.setText("Curve")
         self.preview_button.setStyleSheet("""
-            QPushButton {
-                background-color: #808080; color: white; border: none;
-                padding: 10px; border-radius: 5px; font-size: 14px; font-weight: bold;
-            }
+            QPushButton { background-color: #808080; color: white; padding: 12px; border-radius: 6px;
+                          font-size: 15px; font-weight: bold; }
             QPushButton:hover { background-color: #6E6E6E; }
-            QPushButton:pressed { background-color: #5A5A5A; }
         """)
 
-        self.canvas.draw()
-        self.message_text.append("Curve completed and tool reset.")
-    # -------------------------------------------------
+        self.message_text.append(f"Curve completed! {len(self.curve_labels)} labels remain on graph.")
+        self.canvas.draw_idle()
+
+
+# ===========================================================================================================================================================
+    def clear_curve_labels(self):
+        """Remove all curve labels (used on new curve or reset)"""
+        for label in self.curve_labels:
+            try:
+                label.remove()
+            except:
+                pass
+        self.curve_labels = []
+
+        if self.curve_pick_id:
+            self.canvas.mpl_disconnect(self.curve_pick_id)
+            self.curve_pick_id = None
+
+# ===========================================================================================================================================================
+    def get_last_surface_x(self):
+        """
+        Returns the X-coordinate (distance along zero line) of the most recent point
+        on the Surface Line (either from completed polylines or current drawing).
+        Returns None if no surface points exist.
+        """
+        # Check completed surface polylines (in reverse order - last one first)
+        for polyline in reversed(self.line_types['surface']['polylines']):
+            if polyline:  # if not empty
+                return polyline[-1][0]  # return X of last point
+
+        # Check if currently drawing a surface line
+        if self.active_line_type == 'surface' and self.current_points:
+            if len(self.current_points) > 0:
+                return self.current_points[-1][0]
+
+        # No surface points found
+        return None
+
+# ===========================================================================================================================================================
+    #-------------------------------------------------
     # UNDO GRAPH (Modified)
     # -------------------------------------------------
     def undo_graph(self):
@@ -2428,7 +2566,13 @@ class PointCloudViewer(ApplicationUI):
                 
                 self.line_types[self.active_line_type]['artists'].append(scatter_artist)
                 self.line_types[self.active_line_type]['polylines'].append(self.current_points[:])
+
+                # Add curve labels to all points in this completed polyline if curve is active
+                if self.active_line_type == 'surface' and self.curve_active and self.current_curve_text:
+                    for px, py in self.current_points:
+                        self.add_curve_label_at_x(px)
                 
+
                 for label in self.current_point_labels:
                     if label:
                         self.point_labels.append(label)
@@ -2467,6 +2611,7 @@ class PointCloudViewer(ApplicationUI):
             self.line_types[self.active_line_type]['artists'].append(line_artist)
             self.line_types[self.active_line_type]['polylines'].append(self.current_points[:])
             
+
             # Save the polyline to the current mode's data
             if self.current_mode == 'road' and self.active_line_type in ['construction', 'surface', 'road_surface', 'zero']:
                 if self.active_line_type not in self.road_lines_data:
@@ -2560,26 +2705,25 @@ class PointCloudViewer(ApplicationUI):
         x, y = event.xdata, event.ydata
         if x is None or y is None:
             return
-        
+
         # Get current time for double-click detection
         current_time = time.time()
         time_diff = current_time - self.last_click_time
-        
+
         # Handle double-click (for line completion)
         if time_diff < self.double_click_threshold and len(self.current_points) > 1:
             self.finish_current_polyline()
             self.last_click_time = 0
             return
-        
-        # For construction dots - MODIFIED TO ONLY SHOW DOTS, NO LINES
+
+        # For construction dots - separate handling (your existing code)
         if self.active_line_type == 'construction_dots':
             if len(self.current_points) == 0:
                 self.current_points.append((x, y))
                 label = self.add_point_label(x, y, len(self.current_points), self.active_line_type)
                 if label:
                     self.current_point_labels.append(label)
-                
-                # Draw only a single dot, not a line
+
                 color = self.line_types[self.active_line_type]['color']
                 self.current_artist, = self.ax.plot([x], [y], color=color, marker='o', markersize=8, linestyle='')
             else:
@@ -2587,42 +2731,44 @@ class PointCloudViewer(ApplicationUI):
                 label = self.add_point_label(x, y, len(self.current_points), self.active_line_type)
                 if label:
                     self.current_point_labels.append(label)
-                
-                # For construction dots, we want separate dots, not connected
-                # So we'll add a new artist for each point
+
                 color = self.line_types[self.active_line_type]['color']
                 new_artist, = self.ax.plot([x], [y], color=color, marker='o', markersize=8, linestyle='')
-                
-                # Store all artists for construction dots
+
                 if not hasattr(self, 'construction_dot_artists'):
                     self.construction_dot_artists = []
                 self.construction_dot_artists.append(new_artist)
-            
+
             self.last_click_time = current_time
-            self.canvas.draw()
-            self.figure.tight_layout()
+            self.canvas.draw_idle()
             return
-        
-        # For other line types (original code remains the same)
+
+        # For other line types (including surface)
         if len(self.current_points) == 0:
             self.current_points.append((x, y))
         else:
             self.current_points.append((x, y))
-        
+
         # Update current artist with markers
         color = self.line_types[self.active_line_type]['color']
         xs = [p[0] for p in self.current_points]
         ys = [p[1] for p in self.current_points]
-        
+
         if self.current_artist is None:
             self.current_artist, = self.ax.plot(xs, ys, color=color, linewidth=2, marker='o', markersize=5)
         else:
             self.current_artist.set_data(xs, ys)
             self.current_artist.set_color(color)
-        
+
+        # =====================================================
+        # SPECIAL: Add curve label when drawing Surface Line
+        # =====================================================
+        if self.active_line_type == 'surface' and self.curve_active:
+            latest_x = self.current_points[-1][0]  # X of the newly added point
+            self.add_curve_label_at_x(latest_x)
+
         self.last_click_time = current_time
-        self.canvas.draw()
-        self.figure.tight_layout()
+        self.canvas.draw_idle()
 
     # -------------------------------------------------
     # LOAD POINT CLOUD
@@ -3818,6 +3964,31 @@ class PointCloudViewer(ApplicationUI):
                 self.cid_key = None
         else:
             self.message_text.append("No active line type to reset. Please select a line type first.")
+
+        # Clear all curve labels
+        if hasattr(self, 'curve_labels'):
+            for label in self.curve_labels:
+                try:
+                    label.remove()
+                except:
+                    pass
+            self.curve_labels = []
+
+        if self.curve_pick_id:
+            self.canvas.mpl_disconnect(self.curve_pick_id)
+            self.curve_pick_id = None
+
+        self.curve_active = False
+        self.current_curve_text = ""
+        self.curve_start_x = None
+
+        # Reset button
+        self.preview_button.setText("Curve")
+        self.preview_button.setStyleSheet("""
+            QPushButton { background-color: #808080; color: white; padding: 12px; border-radius: 6px;
+                          font-size: 15px; font-weight: bold; }
+            QPushButton:hover { background-color: #6E6E6E; }
+        """)
             
     # ============================================================================================================================
     # Define the function for the reset all:
@@ -4057,7 +4228,41 @@ class PointCloudViewer(ApplicationUI):
         # Render the VTK window
         if hasattr(self, 'vtk_widget'):
             self.vtk_widget.GetRenderWindow().Render()
-            
+
+
+
+
+        # Clear all curve labels
+        if hasattr(self, 'curve_labels'):
+            for label in self.curve_labels:
+                try:
+                    label.remove()
+                except:
+                    pass
+            self.curve_labels = []
+
+        if self.curve_pick_id:
+            self.canvas.mpl_disconnect(self.curve_pick_id)
+            self.curve_pick_id = None
+
+        self.curve_active = False
+        self.current_curve_text = ""
+        self.curve_start_x = None
+
+        # Reset button
+        self.preview_button.setText("Curve")
+        self.preview_button.setStyleSheet("""
+            QPushButton { background-color: #808080; color: white; padding: 12px; border-radius: 6px;
+                          font-size: 15px; font-weight: bold; }
+            QPushButton:hover { background-color: #6E6E6E; }
+        """)
+
+        # Clear 3D curve actors
+        for actor in self.curve_3d_actors:
+            self.renderer.RemoveActor(actor)
+        self.curve_3d_actors.clear()
+        self.curve_start_point_3d = None
+
     # -------------------------------------------------
     # Graph plot (placeholder for future use) - now embedded in canvas
     # -------------------------------------------------
@@ -4207,7 +4412,3 @@ class PointCloudViewer(ApplicationUI):
             QMessageBox.warning(self, "Load Failed", f"Could not load point cloud:\n{file_path}\n\nError: {str(e)}")
             return False
         
-
-
-
-
