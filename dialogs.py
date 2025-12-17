@@ -1048,8 +1048,10 @@ class MeasurementDialog(QDialog):
         return None
     
 
+
+
 # ===========================================================================================================================
-# DESIGN NEW LAYER DIALOG – With Dynamic Dropdown Based on Road/Bridge Selection
+# DESIGN NEW LAYER DIALOG – With Dynamic Dropdown Based on Road/Bridge Selection + NO OVERWRITE
 # ===========================================================================================================================
 class DesignNewDialog(QDialog):
     def __init__(self, parent=None):
@@ -1057,6 +1059,7 @@ class DesignNewDialog(QDialog):
         self.setWindowTitle("Create New Design Layer")
         self.setModal(True)
         self.setMinimumWidth(440)
+        self.parent = parent  # To access base directories and current worksheet
         self.setStyleSheet("""
             QDialog {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -1155,13 +1158,13 @@ class DesignNewDialog(QDialog):
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Enter unique layer name (required)")
         layout.addWidget(self.name_edit)
-        
+
         # === Layer Dimension (3D / 2D) ===
         dim_group = QGroupBox("Layer Type")
         dim_layout = QVBoxLayout(dim_group)
         self.radio_3d = QRadioButton("3D")
         self.radio_2d = QRadioButton("2D")
-        self.radio_3d.setChecked(True)  # Default to 3D
+        self.radio_3d.setChecked(True)
         dim_layout.addWidget(self.radio_3d)
         dim_layout.addWidget(self.radio_2d)
         layout.addWidget(dim_group)
@@ -1187,15 +1190,11 @@ class DesignNewDialog(QDialog):
         # === Reference Layer Dropdown (Dynamic) ===
         self.ref_layer_group = QGroupBox("Reference Layer")
         ref_layer_layout = QVBoxLayout(self.ref_layer_group)
-
         self.combo_reference = QComboBox()
         self.combo_reference.setEnabled(False)
-
         ref_layer_layout.addWidget(QLabel("Select reference Layer 2D:"))
         ref_layer_layout.addWidget(self.combo_reference)
         layout.addWidget(self.ref_layer_group)
-
-        # Initially visible only if 3D
         self.ref_layer_group.setVisible(True)
         self.update_reference_dropdown()
 
@@ -1206,17 +1205,14 @@ class DesignNewDialog(QDialog):
         # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-
         ok_btn = QPushButton("OK")
         ok_btn.setObjectName("okBtn")
-        ok_btn.clicked.connect(self.accept)
+        ok_btn.clicked.connect(self.validate_and_accept)
         btn_layout.addWidget(ok_btn)
-
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName("cancelBtn")
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
-
         layout.addLayout(btn_layout)
 
     def on_dimension_changed(self, checked):
@@ -1228,10 +1224,8 @@ class DesignNewDialog(QDialog):
     def update_reference_dropdown(self):
         self.combo_reference.clear()
         self.combo_reference.setEnabled(False)
-
         if not self.radio_3d.isChecked():
             return
-
         if self.cb_road.isChecked():
             items = ["Road_Layer_1", "Road_Layer_2", "Road_Layer_3"]
             self.ref_layer_group.setTitle("Reference Layer - Road")
@@ -1241,19 +1235,37 @@ class DesignNewDialog(QDialog):
         else:
             self.ref_layer_group.setTitle("Reference Layer")
             return
-
         self.combo_reference.addItems(items)
         self.combo_reference.setCurrentIndex(0)
         self.combo_reference.setEnabled(True)
 
-    def get_configuration(self):
+    def validate_and_accept(self):
         layer_name = self.name_edit.text().strip()
         if not layer_name:
-            raise ValueError("Layer name is required!")
+            QMessageBox.warning(self, "Input Required", "Layer name is required!")
+            return
 
+        # === Check if layer already exists in current worksheet ===
+        if not hasattr(self.parent, 'current_worksheet_name') or not self.parent.current_worksheet_name:
+            QMessageBox.warning(self, "No Worksheet", "No active worksheet found.")
+            return
+
+        base_designs_path = os.path.join(self.parent.WORKSHEETS_BASE_DIR, self.parent.current_worksheet_name, "designs")
+        layer_folder = os.path.join(base_designs_path, layer_name)
+
+        if os.path.exists(layer_folder):
+            QMessageBox.warning(self, "Name Exists",
+                                "A design layer with this name already exists.\n"
+                                "Please enter a different name.")
+            return  # Do NOT accept — user must change name
+
+        # If all good, accept dialog
+        self.accept()
+
+    def get_configuration(self):
+        layer_name = self.name_edit.text().strip()
         reference_type = None
         reference_line = None
-
         if self.radio_3d.isChecked():
             if self.cb_road.isChecked():
                 reference_type = "Road"
@@ -1261,7 +1273,7 @@ class DesignNewDialog(QDialog):
             elif self.cb_bridge.isChecked():
                 reference_type = "Bridge"
                 reference_line = self.combo_reference.currentText()
-        else:  # 2D
+        else:
             if self.cb_road.isChecked():
                 reference_type = "Road"
             elif self.cb_bridge.isChecked():
@@ -1273,7 +1285,6 @@ class DesignNewDialog(QDialog):
             "reference_type": reference_type,
             "reference_line": reference_line
         }
-
 
 # ===========================================================================================================================
 #                                                ** HELP Dialog Box **
@@ -1348,6 +1359,7 @@ class ConstructionNewDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Construction Layer")
         self.setFixedSize(380, 500)
+        self.parent = parent
         self.setStyleSheet("""
             QDialog {
                 background-color: #F5F5F5;
@@ -1368,63 +1380,52 @@ class ConstructionNewDialog(QDialog):
                 min-width: 90px;
             }
         """)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
-
         # Title
         title = QLabel("Create New Construction Layer")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C;")
         layout.addWidget(title)
-
         # Layer Name
         layout.addWidget(QLabel("Layer Name:"))
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Enter layer name")
         layout.addWidget(self.name_edit)
-
         # Type Selection
         type_group = QGroupBox("Type")
         type_group.setStyleSheet("QGroupBox { font-weight: bold; }")
         type_layout = QHBoxLayout()
         self.road_radio = QRadioButton("Road")
         self.bridge_radio = QRadioButton("Bridge")
-        # self.road_radio.setChecked(True)    
-        type_layout.addWidget(self.road_radio)            
+        type_layout.addWidget(self.road_radio)
         type_layout.addWidget(self.bridge_radio)
         type_group.setLayout(type_layout)
         layout.addWidget(type_group)
-
         # Reference layer
         layout.addWidget(QLabel("Reference Layer of 2D design Layer:"))
         self.ref_layer_combo = QComboBox()
         self.ref_layer_combo.setEditable(True)
         self.ref_layer_combo.addItems(["None", "Design_Layer_01", "Design_Layer_02", "Design_Layer_03"])
         layout.addWidget(self.ref_layer_combo)
-
         # Base lines
         layout.addWidget(QLabel("2D Layer refer to Base lines :"))
         self.base_lines_combo = QComboBox()
         self.base_lines_combo.setEditable(True)
         layout.addWidget(self.base_lines_combo)
-
-        # ------------------------------------------------------------------
-        self.road_base_lines  = ["None", "Zero Line", "Surface Line", "Construction Line", "Road Surface Line"]
+        self.road_base_lines = ["None", "Zero Line", "Surface Line", "Construction Line", "Road Surface Line"]
         self.bridge_base_lines = ["None", "Zero Line", "Projection Line", "Construction Dots", "Deck Line"]
         self.update_base_lines()
-
         self.road_radio.toggled.connect(self.update_base_lines)
-
         # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         self.ok_button = QPushButton("OK")
         self.ok_button.setStyleSheet("background-color:#7B1FA2;color:white;")
+        self.ok_button.clicked.connect(self.validate_and_accept)
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setStyleSheet("background-color:#B0BEC5;color:#333;")
-        self.ok_button.clicked.connect(self.accept)
         self.cancel_button.clicked.connect(self.reject)
         btn_layout.addWidget(self.ok_button)
         btn_layout.addWidget(self.cancel_button)
@@ -1438,14 +1439,25 @@ class ConstructionNewDialog(QDialog):
         idx = self.base_lines_combo.findText(cur)
         self.base_lines_combo.setCurrentIndex(idx if idx != -1 else 0)
 
-    # ------------------------------------------------------------------
-    # This method is now used by open_construction_layer_dialog()
+    def validate_and_accept(self):
+        layer_name = self.name_edit.text().strip()
+        if not layer_name:
+            QMessageBox.warning(self, "Input Required", "Please enter a layer name.")
+            return
+
+        base_dir = r"E:\3D_Tool\user\worksheets"  # Adjust if construction layers are elsewhere
+        if os.path.exists(os.path.join(base_dir, layer_name)):
+            QMessageBox.warning(self, "Name Exists", "A construction layer with this name already exists.\nPlease enter another name.")
+            return
+
+        self.accept()
+
     def get_data(self):
         return {
-            'layer_name'      : self.name_edit.text().strip(),
-            'is_road'         : self.road_radio.isChecked(),
-            'is_bridge'       : self.bridge_radio.isChecked(),
-            'reference_layer' : self.ref_layer_combo.currentText(),
+            'layer_name': self.name_edit.text().strip(),
+            'is_road': self.road_radio.isChecked(),
+            'is_bridge': self.bridge_radio.isChecked(),
+            'reference_layer': self.ref_layer_combo.currentText(),
             'base_lines_layer': self.base_lines_combo.currentText()
         }
     
@@ -1459,10 +1471,7 @@ class CreateProjectDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Create New Project")
         self.setFixedWidth(500)
-        #self.setFixedSize(600, 600)
         self.setModal(True)
-
-        # EXACT STYLE MATCHING YOUR IMAGE
         self.setStyleSheet("""
             QDialog {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -1498,7 +1507,7 @@ class CreateProjectDialog(QDialog):
                 width: 30px;
             }
             QComboBox::down-arrow {
-                image: url(down_arrow.png);  /* optional: add a purple arrow icon */
+                image: url(down_arrow.png);
                 width: 12px;
                 height: 12px;
             }
@@ -1525,7 +1534,7 @@ class CreateProjectDialog(QDialog):
             }
             QPushButton#okBtn:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #9C27B0, stop:1: #7B1FA2);
+                                          stop:0 #9C27B0, stop:1 #7B1FA2);
             }
             QPushButton#cancelBtn {
                 background-color: #E0C3FC;
@@ -1550,80 +1559,61 @@ class CreateProjectDialog(QDialog):
                 background-color: #7B1FA2;
             }
         """)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(5)
-
         # Title
         title = QLabel("Create New Project")
         title.setAccessibleName("title")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
-
         # Project Name
         layout.addWidget(QLabel("Project Name:"))
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Enter project name")
         layout.addWidget(self.name_edit)
-
-
         # Point Cloud Files Section
         layout.addWidget(QLabel("Link 3D Point Cloud Data:"))
-
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(12)
-
         self.browse_file_btn = QPushButton("Choose File(s)")
         self.browse_file_btn.setObjectName("browseFileBtn")
         self.browse_file_btn.clicked.connect(self.browse_files)
-
         self.browse_folder_btn = QPushButton("Choose Folder")
         self.browse_folder_btn.setObjectName("browseFolderBtn")
         self.browse_folder_btn.clicked.connect(self.browse_folder)
-
         btn_layout.addWidget(self.browse_file_btn)
         btn_layout.addWidget(self.browse_folder_btn)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
-
         # File Display
         self.files_display = QTextEdit()
         self.files_display.setReadOnly(True)
         self.files_display.setFixedHeight(140)
         self.files_display.setPlaceholderText("No files selected yet...")
         layout.addWidget(self.files_display)
-
         # File counter
         self.file_count_label = QLabel("0 files selected")
         self.file_count_label.setStyleSheet("color: #6A1B9A; font-style: italic;")
         layout.addWidget(self.file_count_label)
-
         # Project Category
         layout.addWidget(QLabel("Project Category:"))
         self.category_combo = QComboBox()
         self.category_combo.addItems(["None", "Design", "Construction", "Measurement", "Other"])
         layout.addWidget(self.category_combo)
-
         # OK / Cancel Buttons
         button_layout = QHBoxLayout()
         button_layout.addStretch()
-
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName("cancelBtn")
         cancel_btn.clicked.connect(self.reject)
-
         ok_btn = QPushButton("OK")
         ok_btn.setObjectName("okBtn")
         ok_btn.setDefault(True)
-        ok_btn.clicked.connect(self.accept)
-
+        ok_btn.clicked.connect(self.validate_and_accept)
         button_layout.addWidget(cancel_btn)
         button_layout.addWidget(ok_btn)
-
         layout.addLayout(button_layout)
-
-        # Store selected files
         self.selected_files = []
 
     def browse_files(self):
@@ -1655,7 +1645,6 @@ class CreateProjectDialog(QDialog):
     def update_file_display(self):
         count = len(self.selected_files)
         self.file_count_label.setText(f"{count} file{'s' if count != 1 else ''} selected")
-
         if count == 0:
             self.files_display.setPlainText("No files selected yet...")
         elif count <= 12:
@@ -1663,6 +1652,20 @@ class CreateProjectDialog(QDialog):
         else:
             sample = "\n".join(os.path.basename(f) for f in self.selected_files[:10])
             self.files_display.setPlainText(f"{sample}\n... and {count - 10} more files")
+
+    def validate_and_accept(self):
+        project_name = self.name_edit.text().strip()
+        if not project_name:
+            QMessageBox.warning(self, "Input Required", "Please enter a project name.")
+            return
+
+        projects_base = r"E:\3D_Tool\projects"
+        project_folder = os.path.join(projects_base, project_name)
+        if os.path.exists(project_folder):
+            QMessageBox.warning(self, "Name Exists", "A project with this name already exists.\nPlease enter another name.")
+            return
+
+        self.accept()
 
     def get_data(self):
         return {
@@ -1672,9 +1675,8 @@ class CreateProjectDialog(QDialog):
             "file_count": len(self.selected_files)
         }
 
-
 # ===========================================================================================================================
-# ** EXISTING WORKSHEET DIALOG - SCANS FOLDERS AND LOADS worksheet_config.txt **
+# ** EXISTING WORKSHEET DIALOG - SCANS FOLDERS, LOADS worksheet_config.txt, AND SUPPORTS DELETION **
 # ===========================================================================================================================
 class ExistingWorksheetDialog(QDialog):
     def __init__(self, parent=None):
@@ -1754,7 +1756,7 @@ class ExistingWorksheetDialog(QDialog):
         self.button_group.setExclusive(True)
 
         self.worksheets = []
-        self.radio_buttons = []
+        self.radio_buttons = []  # Will store (radio, data, folder_name, item_widget)
 
         # === SCAN WORKSHEET FOLDERS ===
         if not os.path.exists(self.base_dir):
@@ -1787,7 +1789,6 @@ class ExistingWorksheetDialog(QDialog):
                     date_str = data.get("created_at", "")
                     if date_str:
                         try:
-                            # Handle ISO format with or without Z
                             date_str = date_str.replace("Z", "+00:00")
                             date = datetime.fromisoformat(date_str).strftime("%Y-%m-%d %H:%M")
                         except:
@@ -1821,9 +1822,9 @@ class ExistingWorksheetDialog(QDialog):
 
                     radio_layout.addWidget(item_widget)
 
-                    # Add to button group
+                    # Add to button group and our tracking list
                     self.button_group.addButton(radio)
-                    self.radio_buttons.append((radio, data))
+                    self.radio_buttons.append((radio, data, folder_name, item_widget))
 
                 except Exception as e:
                     error_item = QLabel(f"⚠ Error loading {folder_name}: {str(e)}")
@@ -1864,6 +1865,26 @@ class ExistingWorksheetDialog(QDialog):
         open_btn.clicked.connect(self.open_selected_worksheet)
         btn_layout.addWidget(open_btn)
 
+        delete_btn = QPushButton("Delete Selected Worksheet")
+        delete_btn.setFixedWidth(200)
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #FF5252, stop:1 #D32F2F);
+                color: white;
+                border: none;
+                padding: 12px;
+                border-radius: 20px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #F44336, stop:1 #C62828);
+            }
+        """)
+        delete_btn.clicked.connect(self.delete_selected_worksheet)
+        btn_layout.addWidget(delete_btn)
+
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setFixedWidth(100)
         cancel_btn.setStyleSheet("""
@@ -1882,6 +1903,63 @@ class ExistingWorksheetDialog(QDialog):
 
         main_layout.addLayout(btn_layout)
 
+    def get_selected_folder_name(self):
+        """Helper to get the folder name of the currently selected worksheet"""
+        selected_button = self.button_group.checkedButton()
+        if not selected_button:
+            return None
+        for radio, data, folder_name, item_widget in self.radio_buttons:
+            if radio is selected_button:
+                return folder_name
+        return None
+
+    def delete_selected_worksheet(self):
+        """Delete the entire worksheet folder after confirmation"""
+        folder_name = self.get_selected_folder_name()
+        if not folder_name:
+            QMessageBox.information(self, "No Selection", "Please select a worksheet to delete.")
+            return
+
+        worksheet_name = "Unknown"
+        for radio, data, fn, item_widget in self.radio_buttons:
+            if fn == folder_name:
+                worksheet_name = data.get("worksheet_name", folder_name)
+                break
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Deletion",
+            f"Are you sure you want to <b>permanently delete</b> the worksheet:<br><br>"
+            f"<b>{worksheet_name}</b><br>(Folder: {folder_name})<br><br>"
+            f"All files in this worksheet folder will be deleted.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
+        folder_path = os.path.join(self.base_dir, folder_name)
+
+        try:
+            import shutil
+            shutil.rmtree(folder_path)  # Deletes the entire folder and contents
+
+            # Remove from UI
+            selected_button = self.button_group.checkedButton()
+            for radio, data, fn, item_widget in self.radio_buttons[:]:
+                if fn == folder_name:
+                    self.radio_buttons.remove((radio, data, fn, item_widget))
+                    self.button_group.removeButton(radio)
+                    item_widget.setParent(None)  # Removes from layout
+                    radio.deleteLater()
+                    item_widget.deleteLater()
+                    break
+
+            QMessageBox.information(self, "Deleted", f"Worksheet '{worksheet_name}' has been successfully deleted.")
+        except Exception as e:
+            QMessageBox.critical(self, "Deletion Failed", f"Could not delete the worksheet folder:\n\n{str(e)}")
+
     def open_selected_worksheet(self):
         """Handle opening the selected worksheet"""
         selected_button = self.button_group.checkedButton()
@@ -1889,15 +1967,13 @@ class ExistingWorksheetDialog(QDialog):
             QMessageBox.information(self, "No Selection", "Please select a worksheet to open.")
             return
 
-        for radio, data in self.radio_buttons:
+        for radio, data, folder_name, item_widget in self.radio_buttons:
             if radio is selected_button:
                 self.selected_worksheet = data
                 self.accept()
                 return
 
         QMessageBox.warning(self, "Error", "Could not retrieve selected worksheet data.")
-
-
 
 
 # =================================================================================================================================================================
@@ -2225,6 +2301,12 @@ class WorksheetNewDialog(QDialog):
             QMessageBox.warning(self, "Error", "Worksheet name is required.")
             return
 
+        worksheets_base = r"E:\3D_Tool\user\worksheets"
+        worksheet_folder = os.path.join(worksheets_base, worksheet_name)
+        if os.path.exists(worksheet_folder):
+            QMessageBox.warning(self, "Name Exists", "A worksheet with this name already exists.\nPlease enter another name.")
+            return
+
         if self.radio_2d.isChecked():
             if self.cb_road.isChecked():
                 category = "Road"
@@ -2236,7 +2318,6 @@ class WorksheetNewDialog(QDialog):
                 category = "None"
         else:
             category = "None"
-
         self.reference_type = category
         self.accept()
 
@@ -2270,7 +2351,7 @@ class WorksheetNewDialog(QDialog):
 
 
 # ===========================================================================================================================
-# ** ROAD PLANE WIDTH DIALOG **
+# ** ROAD PLANE WIDTH DIALOG **  For the road baseline map on 3D Point Cloud Data
 # ===========================================================================================================================
 class RoadPlaneWidthDialog(QDialog):
     def __init__(self, parent=None):

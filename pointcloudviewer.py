@@ -394,9 +394,9 @@ class PointCloudViewer(ApplicationUI):
 
     # =======================================================================================================================================
 
-    # def open_new_worksheet_dialog(self):
     def open_new_worksheet_dialog(self):
-        """Open dialog to create a new worksheet with Road/Bridge baseline selection and dynamic UI updates"""
+        """Open dialog to create a new worksheet with Road/Bridge baseline selection and dynamic UI updates.
+        Creates 'designs' or 'measurements' subfolder based on 2D/3D selection, then adds the initial layer folder."""
         dialog = WorksheetNewDialog(self)
         if dialog.exec_() != QDialog.Accepted:
             return
@@ -412,10 +412,10 @@ class PointCloudViewer(ApplicationUI):
         category = data["worksheet_category"]  # "Road", "Bridge", "Other", "None"
         worksheet_type = data["worksheet_type"]  # "Design" or "Measurement"
         dimension = "2D" if worksheet_type == "Design" else "3D"
-        initial_layer_name = data["initial_layer_name"]  # ← User-entered layer name
-        point_cloud_file = data.get("point_cloud_file")  # ← Get selected PC file
+        initial_layer_name = data["initial_layer_name"].strip()  # User-entered layer name
+        point_cloud_file = data.get("point_cloud_file")
 
-        # Create worksheet folder
+        # Create main worksheet folder
         worksheet_folder = os.path.join(self.WORKSHEETS_BASE_DIR, worksheet_name)
         try:
             os.makedirs(worksheet_folder, exist_ok=False)
@@ -426,29 +426,46 @@ class PointCloudViewer(ApplicationUI):
                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.No:
                 return
-            # Continue to overwrite config (we'll remove old contents if needed, but for now just proceed)
+            # Continue to overwrite (we'll recreate subfolders)
 
-        # === NEW: Create subfolder for the initial layer using user-entered name ===
-        if initial_layer_name:  # Only if user entered a name
-            layer_folder = os.path.join(worksheet_folder, initial_layer_name)
+        # === NEW LOGIC: Create 'designs' or 'measurements' based on dimension ===
+        if dimension == "2D":
+            base_subfolder = os.path.join(worksheet_folder, "designs")
+            self.message_text.append("   → Creating 'designs' folder for 2D Design mode")
+        else:  # 3D
+            base_subfolder = os.path.join(worksheet_folder, "measurements")
+            self.message_text.append("   → Creating 'measurements' folder for 3D Measurement mode")
+
+        try:
+            os.makedirs(base_subfolder, exist_ok=True)
+        except Exception as e:
+            self.message_text.append(f"   → Warning: Could not create subfolder '{os.path.basename(base_subfolder)}': {str(e)}")
+
+        # === Create initial layer folder inside the correct subfolder (only if layer name provided) ===
+        layer_folder = None
+        if initial_layer_name:
+            layer_folder = os.path.join(base_subfolder, initial_layer_name)
             try:
-                os.makedirs(layer_folder, exist_ok=True)  # exist_ok=True to avoid error if already exists
-                self.message_text.append(f"   → Layer folder created: {initial_layer_name}")
+                os.makedirs(layer_folder, exist_ok=True)
+                self.message_text.append(f"   → Initial layer folder created: {initial_layer_name}")
+                self.message_text.append(f"      Path: {layer_folder}")
             except Exception as e:
-                self.message_text.append(f"   → Warning: Could not create layer folder '{initial_layer_name}': {str(e)}")
+                self.message_text.append(f"   → Error creating layer folder '{initial_layer_name}': {str(e)}")
+                layer_folder = None
         else:
-            self.message_text.append("   → No layer name entered — no layer folder created")
+            self.message_text.append("   → No layer name entered — no initial layer folder created")
 
-        # Save worksheet config — NOW INCLUDING point cloud file
+        # Save worksheet config
         config_data = {
             "worksheet_name": worksheet_name,
             "project_name": project_name or "None",
             "created_at": datetime.now().isoformat(),
             "created_by": self.current_user,
             "worksheet_type": worksheet_type,
-            "initial_layer": initial_layer_name,
+            "initial_layer": initial_layer_name or None,
             "worksheet_category": category,
-            "point_cloud_file": point_cloud_file  # ← SAVE PATH HERE (or None)
+            "dimension": dimension,
+            "point_cloud_file": point_cloud_file
         }
 
         config_path = os.path.join(worksheet_folder, "worksheet_config.txt")
@@ -459,28 +476,27 @@ class PointCloudViewer(ApplicationUI):
             QMessageBox.critical(self, "Save Failed", f"Could not save worksheet config:\n{str(e)}")
             return
 
-        # Update main application state
+        # Update application state
         self.current_worksheet_name = worksheet_name
         self.current_project_name = project_name
         self.current_worksheet_data = config_data.copy()
         self.display_current_worksheet(config_data)
 
-        # Add first layer to left panel — USING USER-ENTERED NAME
-        self.add_layer_to_panel(initial_layer_name, dimension)
+        # Add initial layer to left panel (if name was provided)
+        if initial_layer_name:
+            self.add_layer_to_panel(initial_layer_name, dimension)
 
-        # === NEW: Show/Hide 3D and 2D Layers sections based on dimension ===
+        # Show/Hide 3D vs 2D sections
         if dimension == "3D":
-            # Show 3D Layers, Hide 2D Layers
             self.three_D_frame.setVisible(True)
             self.two_D_frame.setVisible(False)
             self.message_text.append("→ 3D Layers section shown, 2D Layers hidden (Measurement mode)")
         elif dimension == "2D":
-            # Show 2D Layers, Hide 3D Layers
             self.three_D_frame.setVisible(False)
             self.two_D_frame.setVisible(True)
             self.message_text.append("→ 2D Layers section shown, 3D Layers hidden (Design mode)")
 
-        # Message log
+        # Log messages
         self.message_text.append(f"Worksheet '{worksheet_name}' created successfully!")
         self.message_text.append(f"   → Path: {worksheet_folder}")
         self.message_text.append(f"   → Type: {worksheet_type} ({dimension})")
@@ -491,32 +507,23 @@ class PointCloudViewer(ApplicationUI):
         else:
             self.message_text.append(f"   → Point Cloud: None selected")
 
-        # ---------------------------------------------- BASELINE SELECTION LOGIC (Road / Bridge) -------------------------------------------
+        # Baseline logic (Road/Bridge)
         ref_type = None
         ref_line = None
-
         if category in ["Road", "Bridge"]:
             ref_type = category
-
-            if category == "Road":
-                available_lines = ["Road_Layer_1", "Road_Layer_2", "Road_Layer_3"]
-            elif category == "Bridge":
-                available_lines = ["Bridge_Layer_1", "Bridge_Layer_2", "Bridge_Layer_3"]
-            else:
-                available_lines = []
-
+            available_lines = ["Road_Layer_1", "Road_Layer_2", "Road_Layer_3"] if category == "Road" \
+                              else ["Bridge_Layer_1", "Bridge_Layer_2", "Bridge_Layer_3"]
             ref_line = available_lines[0] if available_lines else None
 
             self.message_text.append(f"   → Baseline Type: {ref_type}")
             if ref_line:
                 self.message_text.append(f"   → Reference Baseline: {ref_line}")
-            else:
-                self.message_text.append("   → No baseline available")
 
-        # ----------------------------------------------------- UI UPDATES BASED ON CATEGORY -----------------------------------------------
+        # UI updates based on category
         self.bottom_section.setVisible(category in ["Road", "Bridge"])
 
-        # Hide all mode-specific containers first
+        # Hide all containers first
         self.surface_container.setVisible(False)
         self.construction_container.setVisible(False)
         self.road_surface_container.setVisible(False)
@@ -532,7 +539,6 @@ class PointCloudViewer(ApplicationUI):
             self.road_surface_container.setVisible(True)
             self.zero_container.setVisible(True)
             self.message_text.append(f"Mode Activated: {dimension} - ROAD Mode")
-
         elif category == "Bridge":
             self.deck_line_container.setVisible(True)
             self.projection_container.setVisible(True)
@@ -540,30 +546,29 @@ class PointCloudViewer(ApplicationUI):
             if hasattr(self, 'bridge_zero_container'):
                 self.bridge_zero_container.setVisible(True)
             self.message_text.append(f"Mode Activated: {dimension} - BRIDGE Mode")
-
         else:
-            self.message_text.append(f"Mode Activated: {dimension} - General Mode (No Road/Bridge)")
+            self.message_text.append(f"Mode Activated: {dimension} - General Mode")
 
         if ref_line:
             self.message_text.append(f"Reference Baseline Set: {ref_line}")
 
-        # ------------------------------------------------------- SHOW ACTION BUTTONS ----------------------------------------------------------
+        # Action buttons
         self.preview_button.setVisible(True)
         self.threed_map_button.setVisible(True)
         self.save_button.setVisible(True)
 
-        # Auto-check zero line checkboxes
+        # Auto-check zero lines
         if not self.zero_line_set:
             self.zero_line.setChecked(True)
             if hasattr(self, 'bridge_zero_line'):
                 self.bridge_zero_line.setChecked(True)
 
-        # Refresh canvas and VTK
+        # Refresh rendering
         self.canvas.draw()
         if hasattr(self, 'vtk_widget'):
             self.vtk_widget.GetRenderWindow().Render()
 
-        # ------------------------------------------------ AUTO-LOAD POINT CLOUD IF SELECTED --------------------------------------------------
+        # Auto-load point cloud if selected
         if point_cloud_file and os.path.exists(point_cloud_file):
             self.message_text.append("Auto-loading selected point cloud...")
             success = self.load_point_cloud_from_path(point_cloud_file)
@@ -574,18 +579,20 @@ class PointCloudViewer(ApplicationUI):
         elif point_cloud_file:
             self.message_text.append(f"Selected point cloud file not found: {point_cloud_file}")
 
-        # Final success message — now shows user-entered layer name and folder info
-        layer_display = initial_layer_name if initial_layer_name else "(No layer name entered)"
-        layer_folder_path = os.path.join(worksheet_folder, initial_layer_name) if initial_layer_name else None
-        extra_msg = f"Layer folder: {layer_folder_path}\n" if layer_folder_path else ""
+        # Final success message
+        layer_display = initial_layer_name if initial_layer_name else "(none)"
+        layer_path_display = layer_folder if layer_folder else "(not created)"
+        pc_display = os.path.basename(point_cloud_file) if point_cloud_file else "None"
 
         QMessageBox.information(self, "Success",
                                 f"Worksheet '{worksheet_name}' created successfully!\n\n"
-                                f"First layer: {layer_display}\n"
-                                + extra_msg
-                                + f"Mode: {category or 'General'} ({dimension})\n"
-                                + (f"Point Cloud: {os.path.basename(point_cloud_file)}\n" if point_cloud_file else "")
-                                + f"Saved in:\n{worksheet_folder}")
+                                f"Dimension: {dimension} ({worksheet_type})\n"
+                                f"Initial Layer: {layer_display}\n"
+                                f"Layer Path: {layer_path_display}\n"
+                                f"Mode: {category or 'General'}\n"
+                                f"Point Cloud: {pc_display}\n\n"
+                                f"Saved in:\n{worksheet_folder}")
+
     # =======================================================================================================================================
 
     def display_current_worksheet(self, config_data):
@@ -678,45 +685,33 @@ class PointCloudViewer(ApplicationUI):
             #         margin: 10px 15px 15px 15px;
             #     }
             # """)
+
+
     # =======================================================================================================================================
-    # OPEN CREATE NEW DESIGN LAYER DIALOG
+    # # OPEN CREATE NEW DESIGN LAYER DIALOG
     def open_create_new_design_layer_dialog(self):
         """Open the Design New Layer dialog and save config to current worksheet's designs folder"""
-        # First check if there's an active worksheet
         if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
-            QMessageBox.warning(self, "No Active Worksheet", 
+            QMessageBox.warning(self, "No Active Worksheet",
                                 "Please create or open a worksheet first before creating a design layer.")
             return
 
         dialog = DesignNewDialog(self)
         if dialog.exec_() == QDialog.Accepted:
-            try:
-                config = dialog.get_configuration()
-            except ValueError as e:
-                QMessageBox.warning(self, "Invalid Input", str(e))
-                return
-
+            config = dialog.get_configuration()
             layer_name = config["layer_name"]
             dimension = config["dimension"]
             ref_type = config["reference_type"]
             ref_line = config["reference_line"]
 
-            # === Build path inside current worksheet ===
+            # Build path inside current worksheet
             base_designs_path = os.path.join(self.WORKSHEETS_BASE_DIR, self.current_worksheet_name, "designs")
             layer_folder = os.path.join(base_designs_path, layer_name)
 
-            try:
-                os.makedirs(layer_folder, exist_ok=False)  # Will raise error if exists
-            except FileExistsError:
-                reply = QMessageBox.question(self, "Folder Exists",
-                                             f"A design layer named '{layer_name}' already exists.\n"
-                                             f"Do you want to overwrite it?",
-                                             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-                if reply == QMessageBox.No:
-                    return
-                # If yes, we continue — folder exists, we'll overwrite config
+            # Create folder (safe because we already checked in dialog)
+            os.makedirs(layer_folder, exist_ok=True)
 
-            # === Prepare full config data with metadata ===
+            # Prepare full config data
             full_config = {
                 "layer_name": layer_name,
                 "dimension": dimension,
@@ -728,36 +723,31 @@ class PointCloudViewer(ApplicationUI):
                 "created_at": datetime.now().isoformat(),
             }
 
-            # === Save config file ===
+            # Save config file
             config_file_path = os.path.join(layer_folder, "design_layer_config.txt")
             try:
                 with open(config_file_path, 'w', encoding='utf-8') as f:
                     json.dump(full_config, f, indent=4)
 
-                QMessageBox.information(self,
-                                        "Success",
+                QMessageBox.information(self, "Success",
                                         f"Design layer '{layer_name}' created successfully!\n\n"
                                         f"Location:\n{layer_folder}")
 
                 self.message_text.append(f"New design layer created: {layer_name}")
-                self.message_text.append(f"   → Path: {layer_folder}")
-                self.message_text.append(f"   → Dimension: {dimension}")
+                self.message_text.append(f" → Path: {layer_folder}")
+                self.message_text.append(f" → Dimension: {dimension}")
                 if ref_type:
-                    self.message_text.append(f"   → Type: {ref_type} ({ref_line or 'No reference'})")
+                    self.message_text.append(f" → Type: {ref_type} ({ref_line or 'No reference'})")
 
-                # ==================== NEW: ADD LAYER NAME TO LEFT PANEL ====================
+                # Add to left panel
                 self.add_layer_to_panel(layer_name, dimension)
-                # ==========================================================================
 
             except Exception as e:
                 QMessageBox.critical(self, "Save Failed", f"Could not save design layer config:\n{str(e)}")
-                self.message_text.append(f"Error saving design layer '{layer_name}': {str(e)}")
                 return
 
-            # === UI Updates (same as before) ===
+            # === UI Updates ===
             self.bottom_section.setVisible(True)
-
-            # Hide all containers first
             self.surface_container.setVisible(False)
             self.construction_container.setVisible(False)
             self.road_surface_container.setVisible(False)
@@ -1233,20 +1223,26 @@ class PointCloudViewer(ApplicationUI):
             # Original save functionality for road/bridge
             self.message_text.append("Configuration saved!")
 
-    # =======================================================================================================================================
+    # ===========================================================================================================================================================
     def open_existing_worksheet(self):
         dialog = ExistingWorksheetDialog(self)
         if dialog.exec_() == QDialog.Accepted and dialog.selected_worksheet:
             ws = dialog.selected_worksheet
+
+            # Extract key fields from config
+            worksheet_name = ws.get("worksheet_name")
             project_name = ws.get("project_name")
+            worksheet_type = ws.get("worksheet_type", "Unknown")      # "Design" or "Measurement"
+            worksheet_category = ws.get("worksheet_category", "None") # "Road", "Bridge", "Other", etc.
+            dimension = ws.get("dimension", "2D")                     # For messages
 
             # Set current worksheet info
-            self.current_worksheet_name = ws['worksheet_name']
+            self.current_worksheet_name = worksheet_name
             self.current_project_name = project_name if project_name and project_name.strip() and project_name != "None" else None
             self.current_worksheet_data = ws.copy()
 
             self.display_current_worksheet(ws)
-            self.message_text.append(f"Opened worksheet: {ws['worksheet_name']}")
+            self.message_text.append(f"Opened worksheet: {worksheet_name}")
 
             # === AUTO-LOAD POINT CLOUD FROM LINKED PROJECT ===
             if self.current_project_name:
@@ -1271,6 +1267,80 @@ class PointCloudViewer(ApplicationUI):
                     self.message_text.append(f"Project folder or config not found:\n{config_path}")
             else:
                 self.message_text.append("No project linked to this worksheet.")
+
+            # === NEW: UI VISIBILITY LOGIC BASED ON worksheet_type AND worksheet_category ===
+            # Start by hiding everything
+            self.bottom_section.setVisible(False)
+
+            self.surface_container.setVisible(False)
+            self.construction_container.setVisible(False)
+            self.road_surface_container.setVisible(False)
+            self.zero_container.setVisible(False)
+            self.deck_line_container.setVisible(False)
+            self.projection_container.setVisible(False)
+            self.construction_dots_container.setVisible(False)
+            if hasattr(self, 'bridge_zero_container'):
+                self.bridge_zero_container.setVisible(False)
+
+            # Hide action buttons initially
+            self.preview_button.setVisible(False)
+            self.threed_map_button.setVisible(False)
+            self.save_button.setVisible(False)
+
+            if worksheet_type == "Design":
+                # Only Design worksheets show baselines and bottom section
+                self.bottom_section.setVisible(True)
+
+                if worksheet_category == "Road":
+                    self.surface_container.setVisible(True)
+                    self.construction_container.setVisible(True)
+                    self.road_surface_container.setVisible(True)
+                    self.zero_container.setVisible(True)
+
+                    self.message_text.append(f"Mode Activated: {dimension} - ROAD Mode")
+
+                    # Action buttons
+                    self.preview_button.setVisible(True)
+                    self.threed_map_button.setVisible(True)
+                    self.save_button.setVisible(True)
+
+                    # Auto-check zero line
+                    if not self.zero_line_set:
+                        self.zero_line.setChecked(True)
+
+                elif worksheet_category == "Bridge":
+                    self.deck_line_container.setVisible(True)
+                    self.projection_container.setVisible(True)
+                    self.construction_dots_container.setVisible(True)
+                    if hasattr(self, 'bridge_zero_container'):
+                        self.bridge_zero_container.setVisible(True)
+
+                    self.message_text.append(f"Mode Activated: {dimension} - BRIDGE Mode")
+
+                    # Action buttons
+                    self.preview_button.setVisible(True)
+                    self.threed_map_button.setVisible(True)
+                    self.save_button.setVisible(True)
+
+                    # Auto-check bridge zero line
+                    if hasattr(self, 'bridge_zero_line') and not self.zero_line_set:
+                        self.bridge_zero_line.setChecked(True)
+
+                else:
+                    self.message_text.append(f"Mode Activated: {dimension} - General Mode (Design)")
+
+            elif worksheet_type == "Measurement":
+                # Measurement mode: hide bottom section completely
+                self.message_text.append("Mode Activated: 3D - MEASUREMENT Mode")
+                # No baselines or action buttons shown
+
+            else:
+                self.message_text.append(f"Mode Activated: {dimension} - Unknown Type")
+
+            # Refresh rendering
+            self.canvas.draw()
+            if hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
                 
     # =======================================================================================================================================
     def load_point_cloud_files(self, file_list):
