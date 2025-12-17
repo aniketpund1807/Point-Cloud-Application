@@ -2266,3 +2266,81 @@ class WorksheetNewDialog(QDialog):
             "reference_line": None,
             "point_cloud_file": point_cloud_file
         }
+    
+
+
+# ===========================================================================================================================
+# ** ROAD PLANE WIDTH DIALOG **
+# ===========================================================================================================================
+class RoadPlaneWidthDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Road Plane Width")
+        self.setModal(True)
+        self.setFixedSize(400, 180)
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #f0e6fa, stop:1 #e6e6fa);
+                border-radius: 15px;
+            }
+            QLabel { color: #2d1b3d; font-weight: bold; font-size: 14px; }
+            QDoubleSpinBox {
+                border: 2px solid #BA68C8;
+                border-radius: 8px;
+                padding: 6px;
+                font-size: 14px;
+            }
+            QPushButton {
+                border-radius: 20px;
+                padding: 10px;
+                font-weight: bold;
+                min-width: 100px;
+                border: none;
+            }
+            QPushButton#okBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #AB47BC, stop:1 #8E24AA);
+                color: white;
+            }
+            QPushButton#okBtn:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #9C27B0, stop:1 #7B1FA2); }
+            QPushButton#cancelBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #E1BEE7, stop:1 #CE93D8);
+                color: #333;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(20)
+
+        title = QLabel("Enter Road Plane Width (meters)")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        self.width_spin = QDoubleSpinBox()
+        self.width_spin.setRange(1.0, 1000.0)
+        self.width_spin.setSingleStep(1.0)
+        self.width_spin.setValue(10.0)
+        self.width_spin.setDecimals(2)
+        layout.addWidget(self.width_spin)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        ok_btn = QPushButton("OK")
+        ok_btn.setObjectName("okBtn")
+        ok_btn.clicked.connect(self.accept)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("cancelBtn")
+        cancel_btn.clicked.connect(self.reject)
+
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(ok_btn)
+        layout.addLayout(btn_layout)
+
+    def get_width(self):
+        return self.width_spin.value()

@@ -28,8 +28,8 @@ from math import sqrt, degrees
 from utils import find_best_fitting_plane
 from application_ui import ApplicationUI
 from dialogs import (ConstructionConfigDialog, CurveDialog, ZeroLineDialog, MaterialLineDialog, MeasurementDialog,
-                    DesignNewDialog, WorksheetNewDialog, HelpDialog, ConstructionNewDialog, CreateProjectDialog, ExistingWorksheetDialog,
-                    RoadPlaneWidthDialog)
+                    DesignNewDialog, WorksheetNewDialog, HelpDialog, ConstructionNewDialog, CreateProjectDialog,
+                    ExistingWorksheetDialog)
 
 # =============================================================================================================================================
 #                                                        ** CLASS POINTCLOUDVIEWER **
@@ -4308,7 +4308,7 @@ class PointCloudViewer(ApplicationUI):
             self.canvas.draw()
             self.figure.tight_layout()
 
-# ===========================================================================================================================================
+# ===========================================================================  
     def preview_lines_on_3d(self):
         if not self.zero_line_set:
             self.message_text.append("Zero line must be set before previewing.")
@@ -4317,18 +4317,14 @@ class PointCloudViewer(ApplicationUI):
         if not has_polylines:
             self.message_text.append("No lines drawn to preview.")
             return
-
-        # Clear road planes when previewing to avoid clutter
-        self.clear_road_planes()
-
         # Clear previous preview actors
         for actor in self.preview_actors:
             self.renderer.RemoveActor(actor)
         self.preview_actors = []
-
+        # Direction vector along zero line
         dir_vec = self.zero_end_point - self.zero_start_point
-        p1_z = self.zero_start_z
-
+        p1_z = self.zero_start_z # Reference Z for relative heights
+        # Process each line type
         for line_type in ['surface', 'construction', 'road_surface']:
             if self.line_types[line_type]['polylines']:
                 color = self.line_types[line_type]['color']
@@ -4337,13 +4333,16 @@ class PointCloudViewer(ApplicationUI):
                     for dist, rel_z in poly_2d:
                         t = dist / self.total_distance
                         pos_along = self.zero_start_point + t * dir_vec
-                        z_abs = p1_z + rel_z
+                        z_abs = p1_z + rel_z # Absolute Z = reference Z + relative Z
                         pos_3d = np.array([pos_along[0], pos_along[1], z_abs])
                         points_3d.append(pos_3d)
+                    # Create line segments for the polyline
                     for i in range(len(points_3d) - 1):
                         self.add_preview_line(points_3d[i], points_3d[i + 1], color)
         self.vtk_widget.GetRenderWindow().Render()
         self.message_text.append("Preview lines mapped on 3D point cloud.")
+
+
 
     def add_preview_line(self, p1, p2, color):
         line = vtkLineSource()
@@ -4354,165 +4353,13 @@ class PointCloudViewer(ApplicationUI):
         actor = vtkActor()
         actor.SetMapper(mapper)
         actor.GetProperty().SetColor(self.colors.GetColor3d(color))
-        actor.GetProperty().SetLineWidth(3)
+        actor.GetProperty().SetLineWidth(3) # Thicker for visibility
         self.renderer.AddActor(actor)
         self.preview_actors.append(actor)
 
 
 
-    # =================================================================================================================================
-    # MAP ROAD BASELINES TO 3D PLANES
-    # =================================================================================================================================
-    def map_baselines_to_3d_planes(self):
-        """
-        Main function: Called when user clicks 'Map on 3D' button.
-        Creates planes for ALL currently drawn baseline types.
-        Planes are ADDED incrementally — previous planes remain visible.
-        Each time user draws a new line and clicks 'Map on 3D', new planes are added on top.
-        """
-        if not self.zero_line_set:
-            QMessageBox.warning(self, "Zero Line Required", "Please set the Zero Line first before mapping baselines to planes.")
-            self.message_text.append("Zero line must be set.")
-            return
 
-        # Collect all current polylines from baseline types
-        current_polylines = {}
-        new_segment_count = 0
-        for ltype in self.baseline_types:
-            polylines = self.line_types[ltype]['polylines']
-            if polylines:
-                current_polylines[ltype] = polylines
-                new_segment_count += sum(len(poly) - 1 for poly in polylines if len(poly) >= 2)
-
-        if new_segment_count == 0:
-            QMessageBox.information(self, "No New Lines", "No new baseline segments detected since last mapping.\nDraw or modify lines and try again.")
-            self.message_text.append("No new baseline segments to map.")
-            return
-
-        # Open dialog for width (same width for all this time)
-        dialog = RoadPlaneWidthDialog(self)
-        if dialog.exec_() != QDialog.Accepted:
-            return
-
-        width = dialog.get_width()
-        half_width = width / 2.0
-
-        # DO NOT clear previous planes — we want to accumulate!
-        # self.clear_baseline_planes()  ← REMOVED INTENTIONALLY
-
-        zero_dir_vec = self.zero_end_point - self.zero_start_point
-        zero_length = self.total_distance
-        ref_z = self.zero_start_z
-
-        plane_count_this_time = 0
-
-        for ltype, polylines in current_polylines.items():
-            rgba = self.plane_colors.get(ltype, (0.5, 0.5, 0.5, 0.4))
-            color_rgb = rgba[:3]
-            opacity = rgba[3]
-
-            for poly_2d in polylines:
-                if len(poly_2d) < 2:
-                    continue
-
-                for i in range(len(poly_2d) - 1):
-                    dist1, rel_z1 = poly_2d[i]
-                    dist2, rel_z2 = poly_2d[i + 1]
-
-                    pos1 = self.zero_start_point + (dist1 / zero_length) * zero_dir_vec
-                    pos2 = self.zero_start_point + (dist2 / zero_length) * zero_dir_vec
-
-                    z1 = ref_z + rel_z1
-                    z2 = ref_z + rel_z2
-
-                    center1 = np.array([pos1[0], pos1[1], z1])
-                    center2 = np.array([pos2[0], pos2[1], z2])
-
-                    seg_dir = center2 - center1
-                    seg_len = np.linalg.norm(seg_dir)
-                    if seg_len < 1e-6:
-                        continue
-                    seg_unit = seg_dir / seg_len
-
-                    # Compute horizontal perpendicular direction
-                    horiz = np.array([seg_unit[0], seg_unit[1], 0.0])
-                    hlen = np.linalg.norm(horiz)
-                    if hlen < 1e-6:
-                        # Fallback: perpendicular to zero line
-                        zero_unit = zero_dir_vec / np.linalg.norm(zero_dir_vec)
-                        perp = np.array([-zero_unit[1], zero_unit[0], 0.0])
-                    else:
-                        horiz /= hlen
-                        perp = np.array([-horiz[1], horiz[0], 0.0])
-
-                    # Normalize perp just in case
-                    perp_len = np.linalg.norm(perp)
-                    if perp_len > 0:
-                        perp /= perp_len
-
-                    # Four corners of the plane segment
-                    c1 = center1 + perp * half_width
-                    c2 = center1 - perp * half_width
-                    c3 = center2 - perp * half_width
-                    c4 = center2 + perp * half_width
-
-                    # Create rectangular plane
-                    plane = vtkPlaneSource()
-                    plane.SetOrigin(c1[0], c1[1], c1[2])
-                    plane.SetPoint1(c4[0], c4[1], c4[2])
-                    plane.SetPoint2(c2[0], c2[1], c2[2])
-                    plane.SetXResolution(12)
-                    plane.SetYResolution(2)
-                    plane.Update()
-
-                    mapper = vtkPolyDataMapper()
-                    mapper.SetInputConnection(plane.GetOutputPort())
-
-                    actor = vtkActor()
-                    actor.SetMapper(mapper)
-                    actor.GetProperty().SetColor(*color_rgb)
-                    actor.GetProperty().SetOpacity(opacity)
-                    actor.GetProperty().EdgeVisibilityOn()
-                    actor.GetProperty().SetEdgeColor(*color_rgb)
-                    actor.GetProperty().SetLineWidth(1.5)
-
-                    # Add to scene and store
-                    self.renderer.AddActor(actor)
-                    self.baseline_plane_actors.append(actor)
-                    plane_count_this_time += 1
-
-        # Final render
-        self.vtk_widget.GetRenderWindow().Render()
-
-        # Feedback
-        total_planes = len(self.baseline_plane_actors)
-        self.message_text.append(f"Added {plane_count_this_time} new plane segments (width: {width:.2f}m). Total visible: {total_planes}")
-        
-        QMessageBox.information(
-            self,
-            "Planes Added Successfully",
-            f"Added {plane_count_this_time} new plane segments in this mapping.\n"
-            f"Width: {width:.2f} m (±{half_width:.2f} m each side)\n\n"
-            f"Total planes now visible: {total_planes}\n\n"
-            "You can continue drawing more lines and click 'Map on 3D' again — "
-            "new planes will be added without removing old ones.\n\n"
-            "Color Guide:\n"
-            "• Surface → Green\n"
-            "• Construction → Red\n"
-            "• Road Surface → Blue\n"
-            "• Deck Line → Orange\n"
-            "• Projection → Purple\n"
-            "• Material → Yellow"
-        )
-
-    def clear_baseline_planes(self):
-        """Remove ALL accumulated baseline plane actors — used only on reset or new worksheet."""
-        for actor in self.baseline_plane_actors:
-            if actor.GetRenderer():
-                self.renderer.RemoveActor(actor)
-        self.baseline_plane_actors.clear()
-        if hasattr(self, 'vtk_widget'):
-            self.vtk_widget.GetRenderWindow().Render()
 # ================================================================================================================================
 # ** Back End (Logic) **
 # ================================================================================================================================
