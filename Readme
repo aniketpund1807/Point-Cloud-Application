@@ -11,4 +11,6 @@
 * Map_on_3D Point Cloud Data 2D Design in Plane or strip - Done
 * Displaying the layer name in layer section - Done
 * Delete the existing worksheet from application - Done
+* Save the design layer in json with coordinates - Done
+* Added Pointer on the 3D Point Cloud data to check the current positiono of the chainage according to the point cloud data - Done
 

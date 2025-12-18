@@ -871,7 +871,7 @@ class MaterialLineDialog(QDialog):
     def get_material_data(self):
         """Return the material data entered in the dialog"""
         return {
-            'name': self.name_input.text() or "Material Line",
+            'name': self.name_input.text(),
             'description': self.desc_input.toPlainText(),
             'from_another': self.from_another_radio.isChecked(),
             'material_layer': self.material_layer_radio.isChecked(),

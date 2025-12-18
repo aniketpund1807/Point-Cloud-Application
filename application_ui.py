@@ -72,6 +72,7 @@ class ApplicationUI(QMainWindow):
         stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 20h9"/> <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
         </svg>"""
+
         self.svg_left = b"""<svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M15 18L9 12L15 6" stroke="white" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>"""
@@ -122,6 +123,9 @@ class ApplicationUI(QMainWindow):
         self.all_graph_lines = []
         self.redo_stack = []
         self.current_redo_points = []
+
+        # Initialize the list to track items
+        self.material_items = []  # Important: add this in __init__ or here
 
         # Add this new variable to store point labels
         self.point_labels = []  # For storing point label annotations
@@ -433,6 +437,7 @@ class ApplicationUI(QMainWindow):
             }
         """)
         merger_layout = QVBoxLayout(merger_frame)
+        merger_frame.setVisible(False)                    # change
 
         merger_title = QLabel("Merger Layers")
         merger_title.setAlignment(Qt.AlignCenter)
@@ -460,6 +465,7 @@ class ApplicationUI(QMainWindow):
             }
         """)
         three_D_layout = QVBoxLayout(self.three_D_frame)
+        self.three_D_frame.setVisible(False)
 
         three_D_title = QLabel("3D Layers")
         three_D_title.setAlignment(Qt.AlignCenter)
@@ -502,6 +508,7 @@ class ApplicationUI(QMainWindow):
             }
         """)
         two_D_layout = QVBoxLayout(self.two_D_frame)
+        self.two_D_frame.setVisible(False)
 
         two_D_title = QLabel("2D Layers")
         two_D_title.setAlignment(Qt.AlignCenter)
@@ -531,7 +538,7 @@ class ApplicationUI(QMainWindow):
         two_D_layout.addWidget(two_D_scroll)
 
         # === ADD BOTH FRAMES TO LEFT PANEL ===
-        #left_layout.addWidget(merger_frame)
+        left_layout.addWidget(merger_frame)
         left_layout.addWidget(self.three_D_frame)
         left_layout.addWidget(self.two_D_frame)
 
@@ -1265,7 +1272,7 @@ class ApplicationUI(QMainWindow):
         """)
         self.material_line_container.setVisible(False)  # Hidden until New is clicked
         # self.material_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'material'))
-        # self.material_pencil.clicked.connect(self.edit_material_line)
+        #self.material_pencil.clicked.connect(self.edit_material_line)
         line_layout.addWidget(self.material_line_container)
 
         # Additional buttons - NOW INCLUDING "Add Material Line" at top
@@ -1285,7 +1292,22 @@ class ApplicationUI(QMainWindow):
         """)
         self.add_material_line_button.setVisible(False)  # Hidden initially
         self.add_material_line_button.clicked.connect(self.open_material_line_dialog)
+        
         line_layout.addWidget(self.add_material_line_button)
+
+        # Create a dedicated layout for material items (to control order)
+        self.material_items_layout = QVBoxLayout()
+        self.material_items_layout.setSpacing(6)
+        self.material_items_layout.setContentsMargins(0, 10, 0, 0)
+        self.material_items_layout.setAlignment(Qt.AlignTop)
+
+        # Add this layout right after the button
+        line_layout.addLayout(self.material_items_layout)
+
+        # Optional: store the index where items start (for safety)
+        self.material_items_start_index = line_layout.count() - 1  # points to the layout itself
+            
+        line_layout.addStretch(1)
 
         # Additional buttons
         self.preview_button = QPushButton("Curve")
