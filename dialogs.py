@@ -1360,6 +1360,10 @@ class ConstructionNewDialog(QDialog):
         self.setWindowTitle("Construction Layer")
         self.setFixedSize(380, 500)
         self.parent = parent
+        
+        # This will be set by the main window before showing the dialog
+        self.current_worksheet_path = None  
+
         self.setStyleSheet("""
             QDialog {
                 background-color: #F5F5F5;
@@ -1380,44 +1384,53 @@ class ConstructionNewDialog(QDialog):
                 min-width: 90px;
             }
         """)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
+
         # Title
         title = QLabel("Create New Construction Layer")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C;")
         layout.addWidget(title)
+
         # Layer Name
         layout.addWidget(QLabel("Layer Name:"))
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Enter layer name")
         layout.addWidget(self.name_edit)
+
         # Type Selection
         type_group = QGroupBox("Type")
         type_group.setStyleSheet("QGroupBox { font-weight: bold; }")
         type_layout = QHBoxLayout()
         self.road_radio = QRadioButton("Road")
         self.bridge_radio = QRadioButton("Bridge")
+        self.road_radio.setChecked(True)
         type_layout.addWidget(self.road_radio)
         type_layout.addWidget(self.bridge_radio)
         type_group.setLayout(type_layout)
         layout.addWidget(type_group)
-        # Reference layer
+
+        # Reference Layer Dropdown
         layout.addWidget(QLabel("Reference Layer of 2D design Layer:"))
         self.ref_layer_combo = QComboBox()
-        self.ref_layer_combo.setEditable(True)
-        self.ref_layer_combo.addItems(["None", "Design_Layer_01", "Design_Layer_02", "Design_Layer_03"])
+        self.ref_layer_combo.setEditable(False)
         layout.addWidget(self.ref_layer_combo)
-        # Base lines
-        layout.addWidget(QLabel("2D Layer refer to Base lines :"))
+
+        # Base Lines Dropdown (now shows .json files)
+        layout.addWidget(QLabel("2D Layer refer to Base lines:"))
         self.base_lines_combo = QComboBox()
-        self.base_lines_combo.setEditable(True)
+        self.base_lines_combo.setEditable(False)
         layout.addWidget(self.base_lines_combo)
-        self.road_base_lines = ["None", "Zero Line", "Surface Line", "Construction Line", "Road Surface Line"]
-        self.bridge_base_lines = ["None", "Zero Line", "Projection Line", "Construction Dots", "Deck Line"]
-        self.update_base_lines()
-        self.road_radio.toggled.connect(self.update_base_lines)
+
+        # Initial load
+        self.load_design_layers()
+
+        # Connect signal
+        self.ref_layer_combo.currentIndexChanged.connect(self.on_reference_layer_changed)
+
         # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
@@ -1431,13 +1444,80 @@ class ConstructionNewDialog(QDialog):
         btn_layout.addWidget(self.cancel_button)
         layout.addLayout(btn_layout)
 
-    def update_base_lines(self):
-        cur = self.base_lines_combo.currentText()
+    def set_current_worksheet_path(self, path):
+        """Call before exec_() to set the active worksheet folder."""
+        self.current_worksheet_path = path
+        self.load_design_layers()
+
+    def get_designs_path(self):
+        """Return path to 'designs' folder inside current worksheet."""
+        if not self.current_worksheet_path:
+            return None
+        return os.path.join(self.current_worksheet_path, "designs")
+
+    def load_design_layers(self):
+        """Load all design layer folders into the reference combo."""
+        self.ref_layer_combo.clear()
+        self.ref_layer_combo.addItem("None")
+
+        designs_path = self.get_designs_path()
+        if not designs_path or not os.path.exists(designs_path):
+            self.ref_layer_combo.addItem("(No designs folder)")
+            self.on_reference_layer_changed()
+            return
+
+        try:
+            folders = [
+                name for name in os.listdir(designs_path)
+                if os.path.isdir(os.path.join(designs_path, name))
+            ]
+            folders.sort()
+            if folders:
+                self.ref_layer_combo.addItems(folders)
+            else:
+                self.ref_layer_combo.addItem("(No design layers found)")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to load design layers:\n{e}")
+
+        self.on_reference_layer_changed()
+
+    def get_json_baselines_in_layer(self, design_layer_name):
+        """Return list of .json files inside the selected design layer folder."""
+        if not design_layer_name or design_layer_name in ("None", "(No designs folder)", "(No design layers found)"):
+            return ["None"]
+
+        designs_path = self.get_designs_path()
+        if not designs_path:
+            return ["None"]
+
+        layer_path = os.path.join(designs_path, design_layer_name)
+        if not os.path.exists(layer_path):
+            return ["None"]
+
+        try:
+            json_files = [
+                name for name in os.listdir(layer_path)
+                if name.lower().endswith('.json') and os.path.isfile(os.path.join(layer_path, name))
+            ]
+            json_files.sort()
+            return ["None"] + json_files
+        except Exception:
+            return ["None"]
+
+    def on_reference_layer_changed(self):
+        """Update base lines combo with .json files from selected design layer."""
+        ref_layer = self.ref_layer_combo.currentText()
+        json_baselines = self.get_json_baselines_in_layer(ref_layer)
+
+        current = self.base_lines_combo.currentText()
         self.base_lines_combo.clear()
-        items = self.road_base_lines if self.road_radio.isChecked() else self.bridge_base_lines
-        self.base_lines_combo.addItems(items)
-        idx = self.base_lines_combo.findText(cur)
-        self.base_lines_combo.setCurrentIndex(idx if idx != -1 else 0)
+        self.base_lines_combo.addItems(json_baselines)
+
+        # Restore previous selection if still available
+        if current in json_baselines:
+            self.base_lines_combo.setCurrentText(current)
+        else:
+            self.base_lines_combo.setCurrentIndex(0)  # Default to "None"
 
     def validate_and_accept(self):
         layer_name = self.name_edit.text().strip()
@@ -1445,23 +1525,28 @@ class ConstructionNewDialog(QDialog):
             QMessageBox.warning(self, "Input Required", "Please enter a layer name.")
             return
 
-        base_dir = r"E:\3D_Tool\user\worksheets"  # Adjust if construction layers are elsewhere
+        # Optional: prevent global name conflict
+        base_dir = r"E:\3D_Tool\user\worksheets"
         if os.path.exists(os.path.join(base_dir, layer_name)):
-            QMessageBox.warning(self, "Name Exists", "A construction layer with this name already exists.\nPlease enter another name.")
+            QMessageBox.warning(self, "Name Exists",
+                                "A construction layer with this name already exists.\nPlease enter another name.")
             return
 
         self.accept()
 
     def get_data(self):
+        ref_layer = self.ref_layer_combo.currentText()
+        base_line_json = self.base_lines_combo.currentText()
+
         return {
             'layer_name': self.name_edit.text().strip(),
             'is_road': self.road_radio.isChecked(),
             'is_bridge': self.bridge_radio.isChecked(),
-            'reference_layer': self.ref_layer_combo.currentText(),
-            'base_lines_layer': self.base_lines_combo.currentText()
+            'reference_layer': None if ref_layer in ("None", "(No designs folder)", "(No design layers found)") else ref_layer,
+            'base_lines_layer': None if base_line_json == "None" else base_line_json  # Returns filename like "surface_baseline.json"
         }
     
-
+    
 # ===========================================================================================================================
 # ** CREATE PROJECT DIALOG - IMPROVED VERSION (Supports File + Folder Selection) **
 # ===========================================================================================================================

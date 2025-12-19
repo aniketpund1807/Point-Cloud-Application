@@ -849,37 +849,96 @@ class PointCloudViewer(ApplicationUI):
                 self.presized_button.clicked.connect(self.handle_presized_button)
 
     # =======================================================================================================================================
-    def open_construction_layer_dialog(self):
-        """Open the Construction Layer creation dialog"""
+    def open_construction_new_dialog(self):
+        """Handle 'Construction → New' – full workflow: validation, folder creation, config save, UI switch"""
+        # 1. Must have an active worksheet
+        if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
+            QMessageBox.warning(
+                self,
+                "No Active Worksheet",
+                "Please create or open a worksheet first before creating a construction layer."
+            )
+            self.message_text.append("Attempted to create construction layer without active worksheet.")
+            return
+
+        # 2. Open dialog
         dialog = ConstructionNewDialog(self)
-        if dialog.exec_() == QDialog.Accepted:
-            data = dialog.get_data()
+        # Critical: Pass the current worksheet path
+        dialog.set_current_worksheet_path(
+            os.path.join(self.WORKSHEETS_BASE_DIR, self.current_worksheet_name)
+        )
+        if dialog.exec_() != QDialog.Accepted:
+            return
 
-            layer_name      = data['layer_name']
-            is_road           = data['is_road']
-            is_bridge         = data['is_bridge']
-            reference_layer   = data['reference_layer']
-            base_lines_layer  = data['base_lines_layer']
+        data = dialog.get_data()
+        layer_name = data['layer_name'].strip()
 
-            if not layer_name:
-                QMessageBox.warning(self, "Missing name", "Please enter a layer name")
-                return
+        if not layer_name:
+            QMessageBox.warning(self, "Invalid Name", "Construction layer name cannot be empty!")
+            return
 
-            # ------------------------------------------------------------------
-            # 1. Store the mode (road or bridge) – needed later for many things
-            # ------------------------------------------------------------------
+        # Determine type
+        is_road = data['is_road']
+        is_bridge = data['is_bridge']
+        construction_type = "Road" if is_road else "Bridge" if is_bridge else "General"
+
+        # 3. Create folder structure
+        construction_base = os.path.join(
+            self.WORKSHEETS_BASE_DIR,
+            self.current_worksheet_name,
+            "construction"
+        )
+        layer_folder = os.path.join(construction_base, layer_name)
+
+        if os.path.exists(layer_folder):
+            QMessageBox.warning(
+                self,
+                "Name Exists",
+                f"A construction layer named '{layer_name}' already exists.\n"
+                "Please choose a different name."
+            )
+            return
+
+        try:
+            os.makedirs(layer_folder, exist_ok=False)
+
+            # 4. Save config file
+            config_data = {
+                "construction_layer_name": layer_name,
+                "worksheet_name": self.current_worksheet_name,
+                "project_name": self.current_project_name or "None",
+                "worksheet_type": self.current_worksheet_data.get("worksheet_type", "Unknown"),
+                "worksheet_category": self.current_worksheet_data.get("worksheet_category", "None"),
+                "construction_type": construction_type,
+                "reference_layer_2d": data['reference_layer'],
+                "base_lines_reference": data['base_lines_layer'],
+                "created_at": datetime.now().isoformat(),
+                "created_by": self.current_user,
+                "material_lines": []  # will be populated later
+            }
+
+            config_path = os.path.join(layer_folder, "Construction_Layer_config.txt")
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(config_data, f, indent=4, ensure_ascii=False)
+
+            # 5. Store in memory for current session
             self.current_mode = "road" if is_road else "bridge"
+            self.construction_layer_info = {
+                "name": layer_name,
+                "type": "road" if is_road else "bridge",
+                "reference_layer": data['reference_layer'],
+                "base_line": data['base_lines_layer'],
+                "material_lines": [],
+                "folder": layer_folder
+            }
+            self.construction_layer_created = True
+            self.current_construction_layer = layer_name  # optional: track active one
 
-            # ------------------------------------------------------------------
-            # 2. Show the bottom section (the whole lower panel with the graph)
-            # ------------------------------------------------------------------
+            # 6. Update UI – show bottom section
             self.bottom_section.setVisible(True)
 
-            # ------------------------------------------------------------------
-            # 3. Clean the line-section – keep ONLY "Add Material Line" and "Save"
-            # ------------------------------------------------------------------
-            # hide every checkbox container that exists
-            for container in [
+            # 7. Hide all standard line containers
+            containers_to_hide = [
                 self.zero_container,
                 self.surface_container,
                 self.construction_container,
@@ -887,45 +946,56 @@ class PointCloudViewer(ApplicationUI):
                 self.bridge_zero_container,
                 self.projection_container,
                 self.construction_dots_container,
-                self.material_line_container,      # will be shown again later
                 self.deck_line_container,
-            ]:
-                if hasattr(self, container.objectName() if isinstance(container, str) else container.property("objectName") or ""):
-                    container.setVisible(False)
+                # Note: material_line_container will be shown via "Add Material Line" button
+            ]
+            for container in containers_to_hide:
+                if hasattr(self, container.__class__.__name__) or container:
+                    try:
+                        container.setVisible(False)
+                    except:
+                        pass
 
-            # hide the old buttons that belong to the normal drawing mode
+            # Hide standard buttons
             self.preview_button.setVisible(False)
             self.threed_map_button.setVisible(False)
-            self.save_button.setVisible(False)  
-                
-            # === MAIN GOAL: Update bottom section to Construction layout ===
-            self.switch_to_construction_mode()
-            # ------------------------------------------------------------------
-            # 4. Show ONLY the two buttons that are required for a new construction layer
-            # ------------------------------------------------------------------
-            self.add_material_line_button.setVisible(True)   # “Add Material Line”
-            self.save_button.setVisible(True)                # “Save”
+            # save_button will be shown below
 
-            # (optional) give the user a nice message
-            self.message_text.append(
-                f"Construction layer “{layer_name}” ({'Road' if is_road else 'Bridge'}) created.\n"
-                f"Reference layer : {reference_layer}\n"
-                f"Base line       : {base_lines_layer}\n"
-                "You can now add material lines."
+            # 8. Show construction-specific controls
+            self.add_material_line_button.setVisible(True)
+            self.save_button.setVisible(True)
+
+            # Optional: make Save button say "Save Construction"
+            self.save_button.setText("Save Construction")
+
+            # 9. Add to layers panel
+            self.add_layer_to_panel(layer_name, "3D")
+            self.three_D_frame.setVisible(True)
+
+            # 10. Feedback
+            self.message_text.append(f"Construction layer '{layer_name}' ({construction_type}) created successfully!")
+            self.message_text.append(f"   → Folder: {layer_folder}")
+            self.message_text.append(f"   → Reference 2D Layer: {data['reference_layer']}")
+            self.message_text.append(f"   → Base Line Reference: {data['base_lines_layer']}")
+            self.message_text.append("You can now add material lines using the button below.")
+
+            QMessageBox.information(
+                self,
+                "Construction Layer Created",
+                f"<b>{layer_name}</b> ({construction_type})<br><br>"
+                f"Reference Layer: {data['reference_layer']}<br>"
+                f"Base Line: {data['base_lines_layer']}<br><br>"
+                f"Folder created at:<br>{layer_folder}<br><br>"
+                f"You can now add material lines and save the construction design."
             )
 
-            # ------------------------------------------------------------------
-            # 5. (Optional) store the information somewhere for later saving
-            # ------------------------------------------------------------------
-            self.construction_layer_info = {
-                "name"            : layer_name,
-                "type"            : "road" if is_road else "bridge",
-                "reference_layer" : reference_layer,
-                "base_line"       : base_lines_layer,
-                "material_lines"  : []          # will be filled when the user draws them
-            }
-            self.construction_layer_created = True
-
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Creation Failed",
+                f"Failed to create construction layer '{layer_name}':\n\n{str(e)}"
+            )
+            self.message_text.append(f"Error creating construction layer: {str(e)}")
 
 # ======================================================================================================
     def switch_to_construction_mode(self):
@@ -3470,7 +3540,7 @@ class PointCloudViewer(ApplicationUI):
 
         self.new_worksheet_button.clicked.connect(self.open_new_worksheet_dialog)
         self.new_design_button.clicked.connect(self.open_create_new_design_layer_dialog)
-        self.new_construction_button.clicked.connect(self.open_construction_layer_dialog)
+        self.new_construction_button.clicked.connect(self.open_construction_new_dialog)
         self.new_measurement_button.clicked.connect(self.open_measurement_dialog)
         self.load_button.clicked.connect(self.load_point_cloud)
         self.help_button.clicked.connect(self.show_help_dialog)
