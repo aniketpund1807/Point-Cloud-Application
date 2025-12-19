@@ -2,7 +2,7 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QGridLayout, QGroupBox, QCheckBox, 
     QTextEdit, QComboBox, QDoubleSpinBox, QRadioButton, QButtonGroup, QWidget, QFileDialog, QInputDialog, QMessageBox,
-    QScrollArea, QMenu, QAction, QListWidget
+    QScrollArea, QMenu, QAction, QListWidget, QMainWindow
 )
 from PyQt5.QtCore import Qt
 import os
@@ -1150,8 +1150,6 @@ class MeasurementDialog(QDialog):
         return None
     
 
-
-
 # ===========================================================================================================================
 # DESIGN NEW LAYER DIALOG – With Dynamic Dropdown Based on Road/Bridge Selection + NO OVERWRITE
 # ===========================================================================================================================
@@ -1456,6 +1454,386 @@ class HelpDialog(QDialog):
 # ===========================================================================================================================
 # NEW DIALOG: Construction Layer Creation Dialog (as shown in your image)
 # ===========================================================================================================================
+# class ConstructionNewDialog(QDialog):
+#     def __init__(self, parent=None):
+#         super().__init__(parent)
+#         self.setWindowTitle("Construction Layer")
+#         self.setFixedSize(380, 500)
+#         self.parent = parent
+       
+#         # This will be set by the main window before showing the dialog
+#         self.current_worksheet_path = None
+#         self.setStyleSheet("""
+#             QDialog {
+#                 background-color: #F5F5F5;
+#                 font-family: Segoe UI;
+#             }
+#             QLabel { font-size: 13px; color: #333; }
+#             QLineEdit {
+#                 padding: 8px;
+#                 border: 2px solid #BBB;
+#                 border-radius: 6px;
+#                 font-size: 13px;
+#             }
+#             QRadioButton { font-size: 13px; spacing: 8px; }
+#             QPushButton {
+#                 padding: 10px;
+#                 border-radius: 6px;
+#                 font-weight: bold;
+#                 min-width: 90px;
+#             }
+#         """)
+#         layout = QVBoxLayout(self)
+#         layout.setContentsMargins(20, 20, 20, 20)
+#         layout.setSpacing(15)
+        
+#         # Title
+#         title = QLabel("Create New Construction Layer")
+#         title.setAlignment(Qt.AlignCenter)
+#         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C;")
+#         layout.addWidget(title)
+        
+#         # Layer Name
+#         layout.addWidget(QLabel("Layer Name:"))
+#         self.name_edit = QLineEdit()
+#         self.name_edit.setPlaceholderText("Enter layer name")
+#         layout.addWidget(self.name_edit)
+        
+#         # Type Selection
+#         type_group = QGroupBox("Type")
+#         type_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+#         type_layout = QHBoxLayout()
+#         self.road_radio = QRadioButton("Road")
+#         self.bridge_radio = QRadioButton("Bridge")
+#         self.road_radio.setChecked(True)
+#         type_layout.addWidget(self.road_radio)
+#         type_layout.addWidget(self.bridge_radio)
+#         type_group.setLayout(type_layout)
+#         layout.addWidget(type_group)
+        
+#         # Reference Layer Dropdown
+#         layout.addWidget(QLabel("Reference Layer of 2D design Layer:"))
+#         self.ref_layer_combo = QComboBox()
+#         self.ref_layer_combo.setEditable(False)
+#         layout.addWidget(self.ref_layer_combo)
+        
+#         # Base Lines Dropdown (now shows .json files)
+#         layout.addWidget(QLabel("2D Layer refer to Base lines:"))
+#         self.base_lines_combo = QComboBox()
+#         self.base_lines_combo.setEditable(False)
+#         layout.addWidget(self.base_lines_combo)
+        
+#         # Initial load
+#         self.load_design_layers()
+        
+#         # Connect signals
+#         self.ref_layer_combo.currentIndexChanged.connect(self.on_reference_layer_changed)
+#         self.base_lines_combo.currentIndexChanged.connect(self.on_baseline_selected)  # NEW
+        
+#         # Buttons
+#         btn_layout = QHBoxLayout()
+#         btn_layout.addStretch()
+#         self.ok_button = QPushButton("OK")
+#         self.ok_button.setStyleSheet("background-color:#7B1FA2;color:white;")
+#         self.ok_button.clicked.connect(self.validate_and_accept)
+#         self.cancel_button = QPushButton("Cancel")
+#         self.cancel_button.setStyleSheet("background-color:#B0BEC5;color:#333;")
+#         self.cancel_button.clicked.connect(self.reject)
+#         btn_layout.addWidget(self.ok_button)
+#         btn_layout.addWidget(self.cancel_button)
+#         layout.addLayout(btn_layout)
+#     # =========================================================================================================================================
+#     def set_current_worksheet_path(self, path):
+#         """Call before exec_() to set the active worksheet folder."""
+#         self.current_worksheet_path = path
+#         self.load_design_layers()
+
+#     # =========================================================================================================================================
+#     def get_designs_path(self):
+#         """Return path to 'designs' folder inside current worksheet."""
+#         if not self.current_worksheet_path:
+#             return None
+#         return os.path.join(self.current_worksheet_path, "designs")
+    
+#     # =========================================================================================================================================
+#     def load_design_layers(self):
+#         """Load all design layer folders into the reference combo."""
+#         self.ref_layer_combo.clear()
+#         self.ref_layer_combo.addItem("None")
+#         designs_path = self.get_designs_path()
+#         if not designs_path or not os.path.exists(designs_path):
+#             self.ref_layer_combo.addItem("(No designs folder)")
+#             self.on_reference_layer_changed()
+#             return
+#         try:
+#             folders = [
+#                 name for name in os.listdir(designs_path)
+#                 if os.path.isdir(os.path.join(designs_path, name))
+#             ]
+#             folders.sort()
+#             if folders:
+#                 self.ref_layer_combo.addItems(folders)
+#             else:
+#                 self.ref_layer_combo.addItem("(No design layers found)")
+#         except Exception as e:
+#             QMessageBox.warning(self, "Error", f"Failed to load design layers:\n{e}")
+#         self.on_reference_layer_changed()
+    
+#     # =========================================================================================================================================
+#     def get_json_baselines_in_layer(self, design_layer_name):
+#         """Return list of .json files inside the selected design layer folder."""
+#         if not design_layer_name or design_layer_name in ("None", "(No designs folder)", "(No design layers found)"):
+#             return ["None"]
+#         designs_path = self.get_designs_path()
+#         if not designs_path:
+#             return ["None"]
+#         layer_path = os.path.join(designs_path, design_layer_name)
+#         if not os.path.exists(layer_path):
+#             return ["None"]
+#         try:
+#             json_files = [
+#                 name for name in os.listdir(layer_path)
+#                 if name.lower().endswith('.json') and os.path.isfile(os.path.join(layer_path, name))
+#             ]
+#             json_files.sort()
+#             return ["None"] + json_files
+#         except Exception:
+#             return ["None"]
+
+#     # =========================================================================================================================================
+#     def on_reference_layer_changed(self):
+#         """Update base lines combo with .json files from selected design layer."""
+#         ref_layer = self.ref_layer_combo.currentText()
+#         json_baselines = self.get_json_baselines_in_layer(ref_layer)
+#         current = self.base_lines_combo.currentText()
+#         self.base_lines_combo.clear()
+#         self.base_lines_combo.addItems(json_baselines)
+#         if current in json_baselines:
+#             self.base_lines_combo.setCurrentText(current)
+#         else:
+#             self.base_lines_combo.setCurrentIndex(0)
+
+#     # =========================================================================================================================================
+#     def on_baseline_selected(self):
+#         """When user selects a JSON baseline → load zero line + plot dotted baseline + show label"""
+#         selected_json = self.base_lines_combo.currentText()
+#         if selected_json in ("None", ""):
+#             return
+
+#         ref_layer = self.ref_layer_combo.currentText()
+#         if ref_layer in ("None", "(No designs folder)", "(No design layers found)"):
+#             return
+
+#         designs_path = self.get_designs_path()
+#         if not designs_path:
+#             return
+
+#         json_path = os.path.join(designs_path, ref_layer, selected_json)
+#         if not os.path.exists(json_path):
+#             QMessageBox.warning(self, "File Not Found", f"Baseline file not found:\n{json_path}")
+#             return
+
+#         try:
+#             with open(json_path, 'r', encoding='utf-8') as f:
+#                 data = json.load(f)
+
+#             # Extract required data
+#             zero_start = np.array(data["zero_line_start"])
+#             zero_end = np.array(data["zero_line_end"])
+#             zero_start_z = data.get("zero_start_elevation", 0.0)
+#             total_distance = data["total_chainage_length"]
+#             baseline_key = data["baseline_key"]
+#             baseline_name = data["baseline_type"]
+#             color = data.get("color", "#000000")
+
+#             if total_distance <= 0:
+#                 QMessageBox.warning(self, "Invalid Data", "Total chainage length is zero or invalid.")
+#                 return
+
+#             # === 1. Set Zero Line Safely ===
+#             zero_changed = (
+#                 not hasattr(self.parent, 'zero_line_set') or 
+#                 not self.parent.zero_line_set or
+#                 not np.allclose(self.parent.zero_start_point, zero_start, atol=1e-6) or
+#                 not np.allclose(self.parent.zero_end_point, zero_end, atol=1e-6) or
+#                 abs(self.parent.total_distance - total_distance) > 1e-6
+#             )
+
+#             if zero_changed:
+#                 self.parent.zero_start_point = zero_start
+#                 self.parent.zero_end_point = zero_end
+#                 self.parent.zero_start_z = zero_start_z
+#                 self.parent.total_distance = total_distance
+#                 self.parent.original_total_distance = total_distance
+#                 self.parent.zero_line_set = True
+
+#                 # Safely remove old zero graph line
+#                 if hasattr(self.parent, 'zero_graph_line') and self.parent.zero_graph_line:
+#                     try:
+#                         self.parent.zero_graph_line.remove()
+#                     except:
+#                         pass
+#                     self.parent.zero_graph_line = None
+
+#                 # Plot new zero line
+#                 self.parent.zero_graph_line, = self.parent.ax.plot(
+#                     [0, total_distance], [0, 0],
+#                     color='purple', linewidth=3, zorder=10
+#                 )
+
+#                 # IMPORTANT: Set zero_interval if not exists
+#                 if not hasattr(self.parent, 'zero_interval') or self.parent.zero_interval is None:
+#                     self.parent.zero_interval = 50.0  # default reasonable interval
+#                 # Or better: try to extract from data if present
+#                 if "tick_interval" in data:
+#                     self.parent.zero_interval = float(data["tick_interval"])
+#                 elif "zero_interval" in data:
+#                     self.parent.zero_interval = float(data["zero_interval"])
+#                 else:
+#                     # Smart default based on length
+#                     if total_distance > 5000:
+#                         self.parent.zero_interval = 100.0
+#                     elif total_distance > 1000:
+#                         self.parent.zero_interval = 50.0
+#                     else:
+#                         self.parent.zero_interval = 20.0
+
+#                 # Block signals temporarily to avoid recursion
+#                 self.parent.zero_line.blockSignals(True)
+#                 self.parent.zero_line.setChecked(True)
+#                 self.parent.zero_line.blockSignals(False)
+
+#                 # Now safe to update ticks and scale
+#                 self.parent.scale_section.setVisible(True)
+#                 self.parent.update_chainage_ticks()  # Safe now
+
+#                 self.parent.message_text.append("Zero line and chainage ticks automatically set from selected baseline.")
+
+#             # === 2. Plot dotted baseline ===
+#             if baseline_key not in self.parent.line_types:
+#                 self.parent.line_types[baseline_key] = {'artists': [], 'polylines': []}
+
+#             # Clear previous artists
+#             for artist in self.parent.line_types[baseline_key]['artists']:
+#                 try:
+#                     artist.remove()
+#                 except:
+#                     pass
+#             self.parent.line_types[baseline_key]['artists'].clear()
+#             self.parent.line_types[baseline_key]['polylines'].clear()
+
+#             x_data = []
+#             y_data = []
+#             for poly in data.get("polylines", []):
+#                 poly_x = [pt["chainage_m"] for pt in poly.get("points", [])]
+#                 poly_y = [pt["relative_elevation_m"] for pt in poly.get("points", [])]
+#                 if poly_x:
+#                     x_data.extend(poly_x)
+#                     y_data.extend(poly_y)
+#                     self.parent.line_types[baseline_key]['polylines'].append(list(zip(poly_x, poly_y)))
+
+#             if x_data:
+#                 line_artist, = self.parent.ax.plot(
+#                     x_data, y_data,
+#                     color=color,
+#                     linestyle=':',
+#                     linewidth=3,
+#                     label=baseline_name,
+#                     zorder=5
+#                 )
+#                 self.parent.line_types[baseline_key]['artists'].append(line_artist)
+
+#             self.parent.canvas.draw_idle()
+
+#             # === 3. Add reference label above Save button ===
+#             # Clean up old label
+#             if hasattr(self.parent, 'baseline_reference_label') and self.parent.baseline_reference_label:
+#                 try:
+#                     if self.parent.baseline_reference_label.parent():
+#                         layout = self.parent.baseline_reference_label.parent().layout()
+#                         if layout:
+#                             layout.removeWidget(self.parent.baseline_reference_label)
+#                     self.parent.baseline_reference_label.deleteLater()
+#                 except:
+#                     pass
+#                 self.parent.baseline_reference_label = None
+
+#             # Find bottom layout containing save_button
+#             bottom_layout = None
+#             if hasattr(self.parent, 'save_button') and self.parent.save_button:
+#                 widget = self.parent.save_button
+#                 while widget and not isinstance(widget, QMainWindow):
+#                     if widget.layout() and isinstance(widget.layout(), QHBoxLayout):
+#                         for i in range(widget.layout().count()):
+#                             item = widget.layout().itemAt(i)
+#                             if item and item.widget() == self.parent.save_button:
+#                                 bottom_layout = widget.layout()
+#                                 break
+#                     widget = widget.parent()
+
+#             if not bottom_layout and hasattr(self.parent, 'bottom_section') and self.parent.bottom_section.layout():
+#                 bottom_layout = self.parent.bottom_section.layout()
+
+#             # Create and insert new label
+#             label_text = f"Reference Baseline: <b>{baseline_name}</b> (from {selected_json})"
+#             self.parent.baseline_reference_label = QLabel(label_text)
+#             self.parent.baseline_reference_label.setAlignment(Qt.AlignCenter)
+#             self.parent.baseline_reference_label.setStyleSheet("""
+#                 QLabel {
+#                     font-size: 14px;
+#                     font-weight: bold;
+#                     color: #4A148C;
+#                     padding: 8px;
+#                     background-color: #E8DCF5;
+#                     border-radius: 6px;
+#                     margin: 4px 0;
+#                 }
+#             """)
+
+#             if bottom_layout and hasattr(self.parent, 'save_button'):
+#                 save_index = bottom_layout.indexOf(self.parent.save_button)
+#                 if save_index != -1:
+#                     bottom_layout.insertWidget(save_index, self.parent.baseline_reference_label)
+#                 else:
+#                     bottom_layout.addWidget(self.parent.baseline_reference_label)
+#             else:
+#                 self.parent.message_text.append(label_text)
+
+#             self.parent.message_text.append(f"Loaded and plotted baseline: {baseline_name}")
+
+#         except Exception as e:
+#             QMessageBox.critical(self, "Load Error", f"Failed to load baseline JSON:\n{str(e)}")
+#             self.parent.message_text.append(f"Error loading baseline: {str(e)}")
+
+#     # =========================================================================================================================================
+#     def validate_and_accept(self):
+#         layer_name = self.name_edit.text().strip()
+#         if not layer_name:
+#             QMessageBox.warning(self, "Input Required", "Please enter a layer name.")
+#             return
+
+#         base_dir = r"E:\3D_Tool\user\worksheets"
+#         construction_base = os.path.join(base_dir, self.parent.current_worksheet_name, "construction")
+#         if os.path.exists(os.path.join(construction_base, layer_name)):
+#             QMessageBox.warning(self, "Name Exists",
+#                                 "A construction layer with this name already exists.\nPlease enter another name.")
+#             return
+
+#         self.accept()
+
+#     # =========================================================================================================================================
+#     def get_data(self):
+#         ref_layer = self.ref_layer_combo.currentText()
+#         base_line_json = self.base_lines_combo.currentText()
+#         return {
+#             'layer_name': self.name_edit.text().strip(),
+#             'is_road': self.road_radio.isChecked(),
+#             'is_bridge': self.bridge_radio.isChecked(),
+#             'reference_layer': None if ref_layer in ("None", "(No designs folder)", "(No design layers found)") else ref_layer,
+#             'base_lines_layer': None if base_line_json == "None" else base_line_json
+#         }
+    
+
 class ConstructionNewDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1530,7 +1908,7 @@ class ConstructionNewDialog(QDialog):
         
         # Connect signals
         self.ref_layer_combo.currentIndexChanged.connect(self.on_reference_layer_changed)
-        self.base_lines_combo.currentIndexChanged.connect(self.on_baseline_selected)  # NEW
+        self.base_lines_combo.currentIndexChanged.connect(self.on_baseline_selected)  # Updated handler
         
         # Buttons
         btn_layout = QHBoxLayout()
@@ -1544,6 +1922,7 @@ class ConstructionNewDialog(QDialog):
         btn_layout.addWidget(self.ok_button)
         btn_layout.addWidget(self.cancel_button)
         layout.addLayout(btn_layout)
+
     # =========================================================================================================================================
     def set_current_worksheet_path(self, path):
         """Call before exec_() to set the active worksheet folder."""
@@ -1616,8 +1995,199 @@ class ConstructionNewDialog(QDialog):
             self.base_lines_combo.setCurrentIndex(0)
 
     # =========================================================================================================================================
+    # def on_baseline_selected(self):
+    #     """Enhanced: Load zero line from ANY selected baseline JSON (including Surface, Construction, Road Surface lines),
+    #        then plot the selected line as dotted reference."""
+    #     selected_json = self.base_lines_combo.currentText()
+    #     if selected_json in ("None", ""):
+    #         return
+
+    #     ref_layer = self.ref_layer_combo.currentText()
+    #     if ref_layer in ("None", "(No designs folder)", "(No design layers found)"):
+    #         return
+
+    #     designs_path = self.get_designs_path()
+    #     if not designs_path:
+    #         return
+
+    #     json_path = os.path.join(designs_path, ref_layer, selected_json)
+    #     if not os.path.exists(json_path):
+    #         QMessageBox.warning(self, "File Not Found", f"Baseline file not found:\n{json_path}")
+    #         return
+
+    #     try:
+    #         with open(json_path, 'r', encoding='utf-8') as f:
+    #             data = json.load(f)
+
+    #         # === Extract zero line info (assumed present in all baseline JSONs) ===
+    #         if "zero_line_start" not in data or "zero_line_end" not in data:
+    #             QMessageBox.warning(self, "Invalid File", "Selected JSON does not contain zero line data.")
+    #             return
+
+    #         zero_start = np.array(data["zero_line_start"])
+    #         zero_end = np.array(data["zero_line_end"])
+    #         zero_start_z = data.get("zero_start_elevation", 0.0)
+    #         total_distance = data.get("total_chainage_length", 0.0)
+
+    #         if total_distance <= 0:
+    #             QMessageBox.warning(self, "Invalid Data", "Total chainage length is zero or invalid.")
+    #             return
+
+    #         # === 1. Update Zero Line if changed or not set ===
+    #         zero_changed = (
+    #             not hasattr(self.parent, 'zero_line_set') or 
+    #             not self.parent.zero_line_set or
+    #             not np.allclose(self.parent.zero_start_point, zero_start, atol=1e-6) or
+    #             not np.allclose(self.parent.zero_end_point, zero_end, atol=1e-6) or
+    #             abs(self.parent.total_distance - total_distance) > 1e-6
+    #         )
+
+    #         if zero_changed:
+    #             self.parent.zero_start_point = zero_start
+    #             self.parent.zero_end_point = zero_end
+    #             self.parent.zero_start_z = zero_start_z
+    #             self.parent.total_distance = total_distance
+    #             self.parent.original_total_distance = total_distance
+    #             self.parent.zero_line_set = True
+
+    #             # Remove old zero graph line
+    #             if hasattr(self.parent, 'zero_graph_line') and self.parent.zero_graph_line:
+    #                 try:
+    #                     self.parent.zero_graph_line.remove()
+    #                 except:
+    #                     pass
+    #                 self.parent.zero_graph_line = None
+
+    #             # Plot new zero line
+    #             self.parent.zero_graph_line, = self.parent.ax.plot(
+    #                 [0, total_distance], [0, 0],
+    #                 color='purple', linewidth=3, zorder=10
+    #             )
+
+    #             # Set zero_interval smartly
+    #             if "tick_interval" in data:
+    #                 self.parent.zero_interval = float(data["tick_interval"])
+    #             elif "zero_interval" in data:
+    #                 self.parent.zero_interval = float(data["zero_interval"])
+    #             else:
+    #                 if total_distance > 5000:
+    #                     self.parent.zero_interval = 100.0
+    #                 elif total_distance > 1000:
+    #                     self.parent.zero_interval = 50.0
+    #                 else:
+    #                     self.parent.zero_interval = 20.0
+
+    #             # Enable zero line checkbox
+    #             self.parent.zero_line.blockSignals(True)
+    #             self.parent.zero_line.setChecked(True)
+    #             self.parent.zero_line.blockSignals(False)
+
+    #             self.parent.scale_section.setVisible(True)
+    #             self.parent.update_chainage_ticks()
+
+    #             self.parent.message_text.append("Zero line and chainage scale updated from selected baseline.")
+
+    #         # === 2. Plot the selected line (Surface / Construction / Road Surface / etc.) as dotted ===
+    #         baseline_key = data.get("baseline_key", selected_json)
+    #         baseline_name = data.get("baseline_type", "Unknown Line")
+    #         color = data.get("color", "#000000")
+
+    #         if baseline_key not in self.parent.line_types:
+    #             self.parent.line_types[baseline_key] = {'artists': [], 'polylines': []}
+
+    #         # Clear previous artists for this key
+    #         for artist in self.parent.line_types[baseline_key]['artists']:
+    #             try:
+    #                 artist.remove()
+    #             except:
+    #                 pass
+    #         self.parent.line_types[baseline_key]['artists'].clear()
+    #         self.parent.line_types[baseline_key]['polylines'].clear()
+
+    #         x_data = []
+    #         y_data = []
+    #         for poly in data.get("polylines", []):
+    #             poly_x = [pt["chainage_m"] for pt in poly.get("points", [])]
+    #             poly_y = [pt["relative_elevation_m"] for pt in poly.get("points", [])]
+    #             if poly_x:
+    #                 x_data.extend(poly_x)
+    #                 y_data.extend(poly_y)
+    #                 self.parent.line_types[baseline_key]['polylines'].append(list(zip(poly_x, poly_y)))
+
+    #         if x_data:
+    #             line_artist, = self.parent.ax.plot(
+    #                 x_data, y_data,
+    #                 color=color,
+    #                 linestyle=':',
+    #                 linewidth=3,
+    #                 label=baseline_name,
+    #                 zorder=5
+    #             )
+    #             self.parent.line_types[baseline_key]['artists'].append(line_artist)
+
+    #         self.parent.canvas.draw_idle()
+
+    #         # === 3. Update reference label ===
+    #         if hasattr(self.parent, 'baseline_reference_label') and self.parent.baseline_reference_label:
+    #             try:
+    #                 if self.parent.baseline_reference_label.parent():
+    #                     layout = self.parent.baseline_reference_label.parent().layout()
+    #                     if layout:
+    #                         layout.removeWidget(self.parent.baseline_reference_label)
+    #                 self.parent.baseline_reference_label.deleteLater()
+    #             except:
+    #                 pass
+    #             self.parent.baseline_reference_label = None
+
+    #         label_text = f"Reference Baseline: <b>{baseline_name}</b> (from {selected_json})"
+    #         self.parent.baseline_reference_label = QLabel(label_text)
+    #         self.parent.baseline_reference_label.setAlignment(Qt.AlignCenter)
+    #         self.parent.baseline_reference_label.setStyleSheet("""
+    #             QLabel {
+    #                 font-size: 14px;
+    #                 font-weight: bold;
+    #                 color: #4A148C;
+    #                 padding: 8px;
+    #                 background-color: #E8DCF5;
+    #                 border-radius: 6px;
+    #                 margin: 4px 0;
+    #             }
+    #         """)
+
+    #         # Insert above Save button if possible
+    #         bottom_layout = None
+    #         if hasattr(self.parent, 'save_button') and self.parent.save_button:
+    #             widget = self.parent.save_button
+    #             while widget and not isinstance(widget, QMainWindow):
+    #                 if widget.layout() and isinstance(widget.layout(), QHBoxLayout):
+    #                     for i in range(widget.layout().count()):
+    #                         item = widget.layout().itemAt(i)
+    #                         if item and item.widget() == self.parent.save_button:
+    #                             bottom_layout = widget.layout()
+    #                             break
+    #                 widget = widget.parent()
+
+    #         if not bottom_layout and hasattr(self.parent, 'bottom_section') and self.parent.bottom_section.layout():
+    #             bottom_layout = self.parent.bottom_section.layout()
+
+    #         if bottom_layout and hasattr(self.parent, 'save_button'):
+    #             save_index = bottom_layout.indexOf(self.parent.save_button)
+    #             if save_index != -1:
+    #                 bottom_layout.insertWidget(save_index, self.parent.baseline_reference_label)
+    #             else:
+    #                 bottom_layout.addWidget(self.parent.baseline_reference_label)
+    #         else:
+    #             self.parent.message_text.append(label_text)
+
+    #         self.parent.message_text.append(f"Loaded and plotted reference line: {baseline_name}")
+
+    #     except Exception as e:
+    #         QMessageBox.critical(self, "Load Error", f"Failed to load baseline JSON:\n{str(e)}")
+    #         self.parent.message_text.append(f"Error loading baseline: {str(e)}")
+            
+
     def on_baseline_selected(self):
-        """When user selects a JSON baseline → load zero line + plot dotted baseline + show label above Save button."""
+        """Load zero line + chainage config from selected baseline JSON and plot the reference line as dotted."""
         selected_json = self.base_lines_combo.currentText()
         if selected_json in ("None", ""):
             return
@@ -1639,21 +2209,58 @@ class ConstructionNewDialog(QDialog):
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            # Extract data
+            # === Extract zero line and chainage info ===
             zero_start = np.array(data["zero_line_start"])
             zero_end = np.array(data["zero_line_end"])
-            zero_start_z = data["zero_start_elevation"]
-            total_distance = data["total_chainage_length"]
-            baseline_key = data["baseline_key"]
-            baseline_name = data["baseline_type"]
-            color = data["color"]
+            zero_start_z = float(data.get("zero_start_elevation", 0.0))
+            total_distance = float(data.get("total_chainage_length", 0.0))
 
-            # === 1. Set Zero Line ===
-            if (not hasattr(self.parent, 'zero_line_set') or 
+            if total_distance <= 0:
+                QMessageBox.warning(self, "Invalid Data", "Total chainage length is invalid.")
+                return
+
+            # === Extract KM and interval (from zero_line_config.json if present, else from baseline) ===
+            zero_start_km = None
+            zero_interval = None
+
+            # Try to find embedded zero config (some baselines may include it)
+            if "point1" in data and data["point1"].get("km") is not None:
+                zero_start_km = int(data["point1"]["km"])
+            if "interval_m" in data:
+                zero_interval = float(data["interval_m"])
+
+            # If not found in baseline, try to load from zero_line_config.json in same folder
+            if zero_start_km is None or zero_interval is None:
+                zero_config_path = os.path.join(designs_path, ref_layer, "zero_line_config.json")
+                if os.path.exists(zero_config_path):
+                    try:
+                        with open(zero_config_path, 'r', encoding='utf-8') as zf:
+                            zdata = json.load(zf)
+                        if zero_start_km is None and zdata["point1"].get("km") is not None:
+                            zero_start_km = int(zdata["point1"]["km"])
+                        if zero_interval is None:
+                            zero_interval = float(zdata["interval_m"])
+                    except:
+                        pass
+
+            # Fallback smart interval
+            if zero_interval is None or zero_interval <= 0:
+                if total_distance > 5000:
+                    zero_interval = 100.0
+                elif total_distance > 1000:
+                    zero_interval = 50.0
+                else:
+                    zero_interval = 20.0
+
+            # === Update parent's zero line state ===
+            zero_changed = (
                 not self.parent.zero_line_set or
-                not np.allclose(self.parent.zero_start_point, zero_start) or
-                not np.allclose(self.parent.zero_end_point, zero_end)):
+                not np.allclose(self.parent.zero_start_point, zero_start, atol=1e-4) or
+                not np.allclose(self.parent.zero_end_point, zero_end, atol=1e-4) or
+                abs(self.parent.total_distance - total_distance) > 1e-3
+            )
 
+            if zero_changed:
                 self.parent.zero_start_point = zero_start
                 self.parent.zero_end_point = zero_end
                 self.parent.zero_start_z = zero_start_z
@@ -1661,109 +2268,96 @@ class ConstructionNewDialog(QDialog):
                 self.parent.original_total_distance = total_distance
                 self.parent.zero_line_set = True
 
-                if hasattr(self.parent, 'zero_graph_line') and self.parent.zero_graph_line:
-                    self.parent.zero_graph_line.remove()
-                self.parent.zero_graph_line, = self.parent.ax.plot(
-                    [0, total_distance], [0, 0],
-                    color='purple', linewidth=3
-                )
-                self.parent.zero_line.setChecked(True)
-                self.parent.update_chainage_ticks()
-                self.parent.scale_section.setVisible(True)
-                self.parent.message_text.append("Zero line automatically set from selected baseline.")
+                # Update KM and interval
+                self.parent.zero_start_km = zero_start_km
+                self.parent.zero_interval = zero_interval
 
-            # === 2. Plot baseline as dotted line ===
-            if baseline_key in self.parent.line_types:
-                for artist in self.parent.line_types[baseline_key]['artists']:
+                # Redraw zero line on graph
+                if hasattr(self.parent, 'zero_graph_line') and self.parent.zero_graph_line:
                     try:
-                        artist.remove()
+                        self.parent.zero_graph_line.remove()
                     except:
                         pass
-                self.parent.line_types[baseline_key]['artists'] = []
-                self.parent.line_types[baseline_key]['polylines'] = []
-
-            x_data = []
-            y_data = []
-            for poly in data["polylines"]:
-                poly_x = [pt["chainage_m"] for pt in poly["points"]]
-                poly_y = [pt["relative_elevation_m"] for pt in poly["points"]]
-                x_data.extend(poly_x)
-                y_data.extend(poly_y)
-                self.parent.line_types[baseline_key]['polylines'].append(list(zip(poly_x, poly_y)))
-
-            if x_data:
-                line_artist, = self.parent.ax.plot(
-                    x_data, y_data,
-                    color=color,
-                    linestyle=':',      # Dotted line
-                    linewidth=3,
-                    label=baseline_name
+                self.parent.zero_graph_line, = self.parent.ax.plot(
+                    [0, total_distance], [0, 0],
+                    color='purple', linewidth=3, label='Zero Line', zorder=10
                 )
-                self.parent.line_types[baseline_key]['artists'].append(line_artist)
+
+                # Enable UI elements
+                self.parent.zero_line.blockSignals(True)
+                self.parent.zero_line.setChecked(True)
+                self.parent.zero_line.blockSignals(False)
+                self.parent.scale_section.setVisible(True)
+
+                # === CRITICAL: Update chainage scale and ticks ===
+                self.parent.update_chainage_ticks()
+
+                self.parent.message_text.append(
+                    f"Zero line updated from '{selected_json}' (Length: {total_distance:.1f}m, "
+                    f"Start KM: {zero_start_km if zero_start_km is not None else 'Not set'}, "
+                    f"Interval: {zero_interval:.1f}m)"
+                )
+
+            # === Plot the selected baseline as dotted reference line ===
+            baseline_key = data.get("baseline_key", selected_json.replace("_baseline.json", ""))
+            baseline_name = data.get("baseline_type", "Reference Line")
+            color = data.get("color", "gray")
+
+            if baseline_key not in self.parent.line_types:
+                self.parent.line_types[baseline_key] = {'color': color, 'polylines': [], 'artists': []}
+
+            # Clear previous reference
+            for artist in self.parent.line_types[baseline_key]['artists']:
+                try:
+                    artist.remove()
+                except:
+                    pass
+            self.parent.line_types[baseline_key]['artists'].clear()
+            self.parent.line_types[baseline_key]['polylines'].clear()
+
+            all_x = []
+            all_y = []
+            for poly in data.get("polylines", []):
+                poly_x = [pt["chainage_m"] for pt in poly.get("points", [])]
+                poly_y = [pt["relative_elevation_m"] for pt in poly.get("points", [])]
+                if poly_x:
+                    all_x.extend(poly_x)
+                    all_y.extend(poly_y)
+                    self.parent.line_types[baseline_key]['polylines'].append(list(zip(poly_x, poly_y)))
+
+            if all_x:
+                ref_artist, = self.parent.ax.plot(
+                    all_x, all_y,
+                    color=color,
+                    linestyle=':',
+                    linewidth=3,
+                    alpha=0.8,
+                    label=f"Ref: {baseline_name}",
+                    zorder=5
+                )
+                self.parent.line_types[baseline_key]['artists'].append(ref_artist)
 
             self.parent.canvas.draw_idle()
 
-            # === 3. Add label above Save button (SAFE VERSION) ===
-            # Remove previous label if exists
-            if hasattr(self.parent, 'baseline_reference_label') and self.parent.baseline_reference_label:
-                # Try to remove from its current layout
-                if self.parent.baseline_reference_label.parent():
-                    parent_layout = self.parent.baseline_reference_label.parent().layout()
-                    if parent_layout:
-                        parent_layout.removeWidget(self.parent.baseline_reference_label)
-                self.parent.baseline_reference_label.deleteLater()
-                self.parent.baseline_reference_label = None
-
-            # Find the layout that contains the save_button
-            bottom_layout = None
-            if self.parent.save_button:
-                widget = self.parent.save_button
-                while widget and not bottom_layout:
-                    if widget.layout() and isinstance(widget.layout(), QHBoxLayout):
-                        # Check if save_button is in this layout
-                        for i in range(widget.layout().count()):
-                            if widget.layout().itemAt(i).widget() == self.parent.save_button:
-                                bottom_layout = widget.layout()
-                                break
-                    widget = widget.parent()
-
-            # Fallback: try bottom_section layout
-            if not bottom_layout and hasattr(self.parent, 'bottom_section') and self.parent.bottom_section.layout():
-                bottom_layout = self.parent.bottom_section.layout()
-
-            # Create new label
-            label_text = f"Reference Baseline: <b>{baseline_name}</b> (from {selected_json})"
-            self.parent.baseline_reference_label = QLabel(label_text)
-            self.parent.baseline_reference_label.setAlignment(Qt.AlignCenter)
-            self.parent.baseline_reference_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    font-weight: bold;
-                    color: #4A148C;
-                    padding: 8px;
-                    background-color: #E8DCF5;
-                    border-radius: 6px;
-                    margin: 4px 0;
-                }
-            """)
-
-            # Insert before Save button
-            if bottom_layout and self.parent.save_button:
-                save_index = bottom_layout.indexOf(self.parent.save_button)
-                if save_index != -1:
-                    bottom_layout.insertWidget(save_index, self.parent.baseline_reference_label)
+            # Update reference label in UI
+            if hasattr(self.parent, 'baseline_reference_label'):
+                if self.parent.baseline_reference_label:
+                    self.parent.baseline_reference_label.setText(
+                        f"Reference Baseline: <b>{baseline_name}</b> ← {selected_json}"
+                    )
                 else:
-                    bottom_layout.insertWidget(0, self.parent.baseline_reference_label)  # fallback to start
-            else:
-                # Final fallback: show in message log
-                self.parent.message_text.append(f"Reference Baseline: {baseline_name} (from {selected_json})")
+                    self.parent.baseline_reference_label = QLabel(
+                        f"Reference Baseline: <b>{baseline_name}</b> ← {selected_json}"
+                    )
+                    # Insert near save button or message area
+                    if hasattr(self.parent, 'bottom_section') and self.parent.bottom_section.layout():
+                        self.parent.bottom_section.layout().addWidget(self.parent.baseline_reference_label)
 
-            self.parent.message_text.append(f"Loaded and plotted baseline: {baseline_name}")
+            self.parent.message_text.append(f"Plotted reference: {baseline_name}")
 
         except Exception as e:
-            QMessageBox.critical(self, "Load Error", f"Failed to load baseline JSON:\n{str(e)}")
-            self.parent.message_text.append(f"Error loading baseline: {str(e)}")
-
+            QMessageBox.critical(self, "Load Error", f"Failed to load baseline:\n{str(e)}")
+            self.parent.message_text.append(f"Baseline load error: {str(e)}")
     # =========================================================================================================================================
     def validate_and_accept(self):
         layer_name = self.name_edit.text().strip()
@@ -2340,7 +2934,7 @@ class ExistingWorksheetDialog(QDialog):
             "full_layer_path": full_path
         }
 # =================================================================================================================================================================
-#                                                                    ** Updated WorksheetNewDialog (Layer Name - No Fallback) **
+#                                                   ** Updated WorksheetNewDialog (Layer Name - No Fallback) **
 # =================================================================================================================================================================
 class WorksheetNewDialog(QDialog):
     """Multi-page dialog for creating a new worksheet with conditional Baseline Type selection (only for 2D)."""

@@ -68,6 +68,8 @@ class PointCloudViewer(ApplicationUI):
         # NEW: 3D curve support
         self.surface_line_3d_points = []
 
+        self.zero_interval = None  # Will be set when zero line is defined
+
         self.bottom_button_layout = None   # Add for the baseline name show in bottom section
 
         # NEW: Unified plane support for ALL baselines
@@ -1839,45 +1841,103 @@ class PointCloudViewer(ApplicationUI):
 
     # =======================================================================================================================================
     # UPDATE CHAINAGE TICKS ON GRAPHS
+    # def update_chainage_ticks(self):
+    #     """Update X-axis ticks on main graph and scale with safe integer chainage labels"""
+    #     if not self.zero_line_set or not hasattr(self, 'zero_interval') or self.zero_interval <= 0:
+    #         return
+
+    #     # Force interval to integer (it should always be whole meters like 20, 50, etc.)
+    #     interval = int(self.zero_interval)
+    #     start_km = getattr(self, 'zero_start_km', 0) if hasattr(self, 'zero_start_km') and self.zero_start_km is not None else 0
+
+    #     tick_positions = []
+    #     tick_labels = []
+
+    #     current_pos = 0
+    #     while current_pos <= self.total_distance + interval:
+    #         tick_positions.append(current_pos)
+
+    #         # Calculate exact multiple of interval
+    #         interval_number = int(round(current_pos / interval))
+    #         interval_value_meters = interval_number * interval
+
+    #         # Format as KM + 3-digit meters (e.g., 101+020)
+    #         tick_labels.append(f"{start_km}+{interval_value_meters:03d}")
+
+    #         current_pos += interval
+
+    #     # Update main graph
+    #     self.ax.set_xticks(tick_positions)
+    #     self.ax.set_xticklabels(tick_labels)
+
+    #     # Update scale graph if exists
+    #     if hasattr(self, 'scale_ax') and self.scale_ax is not None:
+    #         self.scale_ax.set_xticks(tick_positions)
+    #         self.scale_ax.set_xticklabels(tick_labels, rotation=30, ha='right')
+
+    #     self.canvas.draw()
+    #     if hasattr(self, 'scale_canvas'):
+    #         self.scale_canvas.draw()
+    #     self.figure.tight_layout()
+
+
+
     def update_chainage_ticks(self):
-        """Update X-axis ticks on main graph and scale with safe integer chainage labels"""
-        if not self.zero_line_set or not hasattr(self, 'zero_interval') or self.zero_interval <= 0:
+        """Update both the top Chainage Scale and the main graph X-axis with KM+interval ticks."""
+        if not (self.zero_line_set and hasattr(self, 'zero_interval') and self.zero_interval and 
+                hasattr(self, 'zero_start_km') and self.zero_start_km is not None):
+            # Fallback to simple distance if no proper chainage config
+            if hasattr(self, 'scale_ax') and self.scale_ax:
+                self.scale_ax.clear()
+                self.scale_ax.axis('off')
+                self.scale_canvas.draw_idle() if hasattr(self, 'scale_canvas') else None
+            self.ax.set_xlabel('Distance (m)')
+            self.ax.set_xticks(np.linspace(0, self.total_distance, 10))
+            self.ax.set_xticklabels([f"{int(x)}m" for x in np.linspace(0, self.total_distance, 10)])
+            self.canvas.draw_idle()
             return
 
-        # Force interval to integer (it should always be whole meters like 20, 50, etc.)
-        interval = int(self.zero_interval)
-        start_km = getattr(self, 'zero_start_km', 0) if hasattr(self, 'zero_start_km') and self.zero_start_km is not None else 0
-
-        tick_positions = []
+        # Calculate number of intervals
+        num_intervals = int(self.total_distance / self.zero_interval)
+        tick_positions = [i * self.zero_interval for i in range(num_intervals + 1)]
         tick_labels = []
 
-        current_pos = 0
-        while current_pos <= self.total_distance + interval:
-            tick_positions.append(current_pos)
+        current_km = self.zero_start_km
+        for i, pos in enumerate(tick_positions):
+            interval_val = i * self.zero_interval
+            if interval_val >= 1000:  # Very long sections – increase KM
+                additional_km = int(interval_val // 1000)
+                current_km += additional_km
+                interval_val = interval_val % 1000
+            label = f"{current_km}+{int(interval_val):03d}"
+            tick_labels.append(label)
 
-            # Calculate exact multiple of interval
-            interval_number = int(round(current_pos / interval))
-            interval_value_meters = interval_number * interval
-
-            # Format as KM + 3-digit meters (e.g., 101+020)
-            tick_labels.append(f"{start_km}+{interval_value_meters:03d}")
-
-            current_pos += interval
-
-        # Update main graph
-        self.ax.set_xticks(tick_positions)
-        self.ax.set_xticklabels(tick_labels)
-
-        # Update scale graph if exists
-        if hasattr(self, 'scale_ax') and self.scale_ax is not None:
+        # === Update Top Chainage Scale (orange bar) ===
+        if hasattr(self, 'scale_ax') and self.scale_ax:
+            self.scale_ax.clear()
+            self.scale_ax.plot([0, self.total_distance], [0, 0], color='black', linewidth=2)
+            self.scale_ax.set_xlim(0, self.total_distance)
+            self.scale_ax.set_ylim(-0.5, 0.5)
+            self.scale_ax.set_yticks([])
             self.scale_ax.set_xticks(tick_positions)
-            self.scale_ax.set_xticklabels(tick_labels, rotation=30, ha='right')
+            self.scale_ax.set_xticklabels(tick_labels, rotation=45, ha='right', fontsize=9)
+            self.scale_ax.set_title("Chainage Scale", fontsize=11, weight='bold', pad=10)
+            self.scale_ax.spines['bottom'].set_visible(True)
+            self.scale_ax.spines['top'].set_visible(False)
+            self.scale_ax.spines['left'].set_visible(False)
+            self.scale_ax.spines['right'].set_visible(False)
+            self.scale_ax.tick_params(axis='x', which='both', length=6)
+            if hasattr(self, 'scale_canvas'):
+                self.scale_canvas.draw_idle()
 
-        self.canvas.draw()
-        if hasattr(self, 'scale_canvas'):
-            self.scale_canvas.draw()
-        self.figure.tight_layout()
+        # === Update Main Graph X-axis ===
+        self.ax.set_xlim(0, self.total_distance)
+        self.ax.set_xticks(tick_positions)
+        self.ax.set_xticklabels(tick_labels, rotation=45, ha='right', fontsize=9)
+        self.ax.set_xlabel('Chainage (KM + Interval)')
+        self.ax.grid(True, axis='x', linestyle='--', alpha=0.5)
 
+        self.canvas.draw_idle()
 
     # =======================================================================================================================================
     # UPDATE SCALE MARKER BASED ON SLIDER
