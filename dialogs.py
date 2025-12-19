@@ -2,7 +2,7 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QGridLayout, QGroupBox, QCheckBox, 
     QTextEdit, QComboBox, QDoubleSpinBox, QRadioButton, QButtonGroup, QWidget, QFileDialog, QInputDialog, QMessageBox,
-    QScrollArea, QMenu, QAction
+    QScrollArea, QMenu, QAction, QListWidget
 )
 from PyQt5.QtCore import Qt
 import os
@@ -29,12 +29,6 @@ class ZeroLineDialog(QDialog):
             QLabel {
                 color: black;
                 font-weight: 500;
-            }
-            QFrame {
-                background-color: rgba(255,255,255,0.2);
-                border-radius: 10px;
-                margin: 5px;
-                padding: 10px;
             }
             QGroupBox {
                 border: 2px solid #7B1FA2;
@@ -99,8 +93,10 @@ class ZeroLineDialog(QDialog):
                 padding: 12px 10px 8px 10px;
             }
         """)
-        layout = QVBoxLayout()
-        # Point 1 coordinates - editable
+
+        layout = QVBoxLayout(self)
+
+        # Point 1 coordinates
         group_p1 = QGroupBox("Point 1 Coordinates")
         layout_p1 = QGridLayout(group_p1)
         layout_p1.addWidget(QLabel("X:"), 0, 0)
@@ -113,16 +109,20 @@ class ZeroLineDialog(QDialog):
         self.z1_edit = QLineEdit(f"{point1[2]:.3f}" if point1 is not None else "0.000")
         layout_p1.addWidget(self.z1_edit, 1, 1)
         layout.addWidget(group_p1)
+
         # Point 1 KM and Chainage
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("Point 1 KM:"))
         self.km1_edit = QLineEdit(str(km1) if km1 is not None else "")
+        self.km1_edit.setPlaceholderText("e.g. 101")
         row1.addWidget(self.km1_edit)
         row1.addWidget(QLabel("Chainage:"))
         self.chain1_edit = QLineEdit(str(chain1) if chain1 is not None else "")
+        self.chain1_edit.setPlaceholderText("Optional")
         row1.addWidget(self.chain1_edit)
         layout.addLayout(row1)
-        # Point 2 coordinates - editable
+
+        # Point 2 coordinates
         group_p2 = QGroupBox("Point 2 Coordinates")
         layout_p2 = QGridLayout(group_p2)
         layout_p2.addWidget(QLabel("X:"), 0, 0)
@@ -135,41 +135,143 @@ class ZeroLineDialog(QDialog):
         self.z2_edit = QLineEdit(f"{point2[2]:.3f}" if point2 is not None else "0.000")
         layout_p2.addWidget(self.z2_edit, 1, 1)
         layout.addWidget(group_p2)
+
         # Point 2 KM and Chainage
         row2 = QHBoxLayout()
         row2.addWidget(QLabel("Point 2 KM:"))
         self.km2_edit = QLineEdit(str(km2) if km2 is not None else "")
+        self.km2_edit.setPlaceholderText("e.g. 102")
         row2.addWidget(self.km2_edit)
         row2.addWidget(QLabel("Chainage:"))
         self.chain2_edit = QLineEdit(str(chain2) if chain2 is not None else "")
+        self.chain2_edit.setPlaceholderText("Optional")
         row2.addWidget(self.chain2_edit)
         layout.addLayout(row2)
+
         # Interval
+        from PyQt5.QtGui import QIntValidator
+
+        # Replace the interval line with this:
         row_int = QHBoxLayout()
         row_int.addWidget(QLabel("Interval (m):"))
-        self.interval_edit = QLineEdit(str(interval) if interval is not None else "20")
+        self.interval_edit = QLineEdit(str(int(interval)) if interval is not None else "20")
+        self.interval_edit.setValidator(QIntValidator(1, 10000))  # Only positive integers
+        self.interval_edit.setPlaceholderText("e.g. 20")
         row_int.addWidget(self.interval_edit)
         layout.addLayout(row_int)
+
         # Buttons
         btn_layout = QHBoxLayout()
         save_btn = QPushButton("Save Zero Line")
         save_btn.setObjectName("saveBtn")
-        save_btn.clicked.connect(self.accept)
+        save_btn.clicked.connect(self.on_save_clicked)
         btn_layout.addWidget(save_btn)
+
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName("cancelBtn")
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
+
         layout.addLayout(btn_layout)
         self.setLayout(layout)
-    def get_points(self):
-        try:
-            p1 = np.array([float(self.x1_edit.text()), float(self.y1_edit.text()), float(self.z1_edit.text())])
-            p2 = np.array([float(self.x2_edit.text()), float(self.y2_edit.text()), float(self.z2_edit.text())])
-            return p1, p2
-        except ValueError:
-            return None, None
 
+    # -------------------------------------------------
+    # Custom save button handler with full validation
+    # -------------------------------------------------
+    def on_save_clicked(self):
+        if self.validate_all_inputs():
+            self.accept()  # Only accept if everything is valid
+
+    # -------------------------------------------------
+    # Full input validation
+    # -------------------------------------------------
+    def validate_all_inputs(self):
+        errors = []
+
+        # Validate coordinates (must be valid floats and not empty)
+        coord_fields = [
+            ("Point 1 X", self.x1_edit),
+            ("Point 1 Y", self.y1_edit),
+            ("Point 1 Z", self.z1_edit),
+            ("Point 2 X", self.x2_edit),
+            ("Point 2 Y", self.y2_edit),
+            ("Point 2 Z", self.z2_edit),
+        ]
+
+        for label, edit in coord_fields:
+            text = edit.text().strip()
+            if not text:
+                errors.append(f"{label} cannot be empty.")
+                continue
+            try:
+                float(text)
+            except ValueError:
+                errors.append(f"{label} must be a valid number (e.g., 387211.438).")
+
+        # Validate KM fields (optional, but must be integer if filled)
+        for label, edit in [("Point 1 KM", self.km1_edit), ("Point 2 KM", self.km2_edit)]:
+            text = edit.text().strip()
+            if text:
+                if not text.isdigit():
+                    errors.append(f"{label} must be a whole number (e.g., 101).")
+
+        # Validate interval
+        interval_text = self.interval_edit.text().strip()
+        if not interval_text:
+            errors.append("Interval cannot be empty.")
+        else:
+            try:
+                interval_val = float(interval_text)
+                if interval_val <= 0:
+                    errors.append("Interval must be greater than 0.")
+            except ValueError:
+                errors.append("Interval must be a valid number (e.g., 20 or 20.5).")
+
+        if errors:
+            QMessageBox.warning(
+                self,
+                "Invalid Input",
+                "Please correct the following errors:\n\n" + "\n".join(f"• {e}" for e in errors)
+            )
+            return False
+
+        return True
+
+    # -------------------------------------------------
+    # Safe extraction of coordinates
+    # -------------------------------------------------
+    def get_points(self):
+        """Returns (p1, p2) as numpy arrays. Guaranteed valid due to validation."""
+        try:
+            p1 = np.array([
+                float(self.x1_edit.text().strip()),
+                float(self.y1_edit.text().strip()),
+                float(self.z1_edit.text().strip())
+            ])
+            p2 = np.array([
+                float(self.x2_edit.text().strip()),
+                float(self.y2_edit.text().strip()),
+                float(self.z2_edit.text().strip())
+            ])
+            return p1, p2
+        except Exception:
+            return None, None  # Should never reach here due to validation
+
+    # -------------------------------------------------
+    # Optional: Helper to get KM and interval safely
+    # -------------------------------------------------
+    def get_configuration(self):
+        """Returns full config including KM and interval"""
+        km1 = self.km1_edit.text().strip()
+        km2 = self.km2_edit.text().strip()
+        interval = float(self.interval_edit.text().strip())
+        self.zero_interval = int(self.interval_edit.text().strip() or 20)
+
+        return {
+            'km1': int(km1) if km1 else None,
+            'km2': int(km2) if km2 else None,
+            'interval': interval
+        }
 # ===========================================================================================================================
 # ** CURVE DIALOG **
 # ===========================================================================================================================
@@ -1360,10 +1462,9 @@ class ConstructionNewDialog(QDialog):
         self.setWindowTitle("Construction Layer")
         self.setFixedSize(380, 500)
         self.parent = parent
-        
+       
         # This will be set by the main window before showing the dialog
-        self.current_worksheet_path = None  
-
+        self.current_worksheet_path = None
         self.setStyleSheet("""
             QDialog {
                 background-color: #F5F5F5;
@@ -1384,23 +1485,22 @@ class ConstructionNewDialog(QDialog):
                 min-width: 90px;
             }
         """)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
-
+        
         # Title
         title = QLabel("Create New Construction Layer")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #4A148C;")
         layout.addWidget(title)
-
+        
         # Layer Name
         layout.addWidget(QLabel("Layer Name:"))
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Enter layer name")
         layout.addWidget(self.name_edit)
-
+        
         # Type Selection
         type_group = QGroupBox("Type")
         type_group.setStyleSheet("QGroupBox { font-weight: bold; }")
@@ -1412,25 +1512,26 @@ class ConstructionNewDialog(QDialog):
         type_layout.addWidget(self.bridge_radio)
         type_group.setLayout(type_layout)
         layout.addWidget(type_group)
-
+        
         # Reference Layer Dropdown
         layout.addWidget(QLabel("Reference Layer of 2D design Layer:"))
         self.ref_layer_combo = QComboBox()
         self.ref_layer_combo.setEditable(False)
         layout.addWidget(self.ref_layer_combo)
-
+        
         # Base Lines Dropdown (now shows .json files)
         layout.addWidget(QLabel("2D Layer refer to Base lines:"))
         self.base_lines_combo = QComboBox()
         self.base_lines_combo.setEditable(False)
         layout.addWidget(self.base_lines_combo)
-
+        
         # Initial load
         self.load_design_layers()
-
-        # Connect signal
+        
+        # Connect signals
         self.ref_layer_combo.currentIndexChanged.connect(self.on_reference_layer_changed)
-
+        self.base_lines_combo.currentIndexChanged.connect(self.on_baseline_selected)  # NEW
+        
         # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
@@ -1443,29 +1544,29 @@ class ConstructionNewDialog(QDialog):
         btn_layout.addWidget(self.ok_button)
         btn_layout.addWidget(self.cancel_button)
         layout.addLayout(btn_layout)
-
+    # =========================================================================================================================================
     def set_current_worksheet_path(self, path):
         """Call before exec_() to set the active worksheet folder."""
         self.current_worksheet_path = path
         self.load_design_layers()
 
+    # =========================================================================================================================================
     def get_designs_path(self):
         """Return path to 'designs' folder inside current worksheet."""
         if not self.current_worksheet_path:
             return None
         return os.path.join(self.current_worksheet_path, "designs")
-
+    
+    # =========================================================================================================================================
     def load_design_layers(self):
         """Load all design layer folders into the reference combo."""
         self.ref_layer_combo.clear()
         self.ref_layer_combo.addItem("None")
-
         designs_path = self.get_designs_path()
         if not designs_path or not os.path.exists(designs_path):
             self.ref_layer_combo.addItem("(No designs folder)")
             self.on_reference_layer_changed()
             return
-
         try:
             folders = [
                 name for name in os.listdir(designs_path)
@@ -1478,22 +1579,19 @@ class ConstructionNewDialog(QDialog):
                 self.ref_layer_combo.addItem("(No design layers found)")
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load design layers:\n{e}")
-
         self.on_reference_layer_changed()
-
+    
+    # =========================================================================================================================================
     def get_json_baselines_in_layer(self, design_layer_name):
         """Return list of .json files inside the selected design layer folder."""
         if not design_layer_name or design_layer_name in ("None", "(No designs folder)", "(No design layers found)"):
             return ["None"]
-
         designs_path = self.get_designs_path()
         if not designs_path:
             return ["None"]
-
         layer_path = os.path.join(designs_path, design_layer_name)
         if not os.path.exists(layer_path):
             return ["None"]
-
         try:
             json_files = [
                 name for name in os.listdir(layer_path)
@@ -1504,49 +1602,195 @@ class ConstructionNewDialog(QDialog):
         except Exception:
             return ["None"]
 
+    # =========================================================================================================================================
     def on_reference_layer_changed(self):
         """Update base lines combo with .json files from selected design layer."""
         ref_layer = self.ref_layer_combo.currentText()
         json_baselines = self.get_json_baselines_in_layer(ref_layer)
-
         current = self.base_lines_combo.currentText()
         self.base_lines_combo.clear()
         self.base_lines_combo.addItems(json_baselines)
-
-        # Restore previous selection if still available
         if current in json_baselines:
             self.base_lines_combo.setCurrentText(current)
         else:
-            self.base_lines_combo.setCurrentIndex(0)  # Default to "None"
+            self.base_lines_combo.setCurrentIndex(0)
 
+    # =========================================================================================================================================
+    def on_baseline_selected(self):
+        """When user selects a JSON baseline → load zero line + plot dotted baseline + show label above Save button."""
+        selected_json = self.base_lines_combo.currentText()
+        if selected_json in ("None", ""):
+            return
+
+        ref_layer = self.ref_layer_combo.currentText()
+        if ref_layer in ("None", "(No designs folder)", "(No design layers found)"):
+            return
+
+        designs_path = self.get_designs_path()
+        if not designs_path:
+            return
+
+        json_path = os.path.join(designs_path, ref_layer, selected_json)
+        if not os.path.exists(json_path):
+            QMessageBox.warning(self, "File Not Found", f"Baseline file not found:\n{json_path}")
+            return
+
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # Extract data
+            zero_start = np.array(data["zero_line_start"])
+            zero_end = np.array(data["zero_line_end"])
+            zero_start_z = data["zero_start_elevation"]
+            total_distance = data["total_chainage_length"]
+            baseline_key = data["baseline_key"]
+            baseline_name = data["baseline_type"]
+            color = data["color"]
+
+            # === 1. Set Zero Line ===
+            if (not hasattr(self.parent, 'zero_line_set') or 
+                not self.parent.zero_line_set or
+                not np.allclose(self.parent.zero_start_point, zero_start) or
+                not np.allclose(self.parent.zero_end_point, zero_end)):
+
+                self.parent.zero_start_point = zero_start
+                self.parent.zero_end_point = zero_end
+                self.parent.zero_start_z = zero_start_z
+                self.parent.total_distance = total_distance
+                self.parent.original_total_distance = total_distance
+                self.parent.zero_line_set = True
+
+                if hasattr(self.parent, 'zero_graph_line') and self.parent.zero_graph_line:
+                    self.parent.zero_graph_line.remove()
+                self.parent.zero_graph_line, = self.parent.ax.plot(
+                    [0, total_distance], [0, 0],
+                    color='purple', linewidth=3
+                )
+                self.parent.zero_line.setChecked(True)
+                self.parent.update_chainage_ticks()
+                self.parent.scale_section.setVisible(True)
+                self.parent.message_text.append("Zero line automatically set from selected baseline.")
+
+            # === 2. Plot baseline as dotted line ===
+            if baseline_key in self.parent.line_types:
+                for artist in self.parent.line_types[baseline_key]['artists']:
+                    try:
+                        artist.remove()
+                    except:
+                        pass
+                self.parent.line_types[baseline_key]['artists'] = []
+                self.parent.line_types[baseline_key]['polylines'] = []
+
+            x_data = []
+            y_data = []
+            for poly in data["polylines"]:
+                poly_x = [pt["chainage_m"] for pt in poly["points"]]
+                poly_y = [pt["relative_elevation_m"] for pt in poly["points"]]
+                x_data.extend(poly_x)
+                y_data.extend(poly_y)
+                self.parent.line_types[baseline_key]['polylines'].append(list(zip(poly_x, poly_y)))
+
+            if x_data:
+                line_artist, = self.parent.ax.plot(
+                    x_data, y_data,
+                    color=color,
+                    linestyle=':',      # Dotted line
+                    linewidth=3,
+                    label=baseline_name
+                )
+                self.parent.line_types[baseline_key]['artists'].append(line_artist)
+
+            self.parent.canvas.draw_idle()
+
+            # === 3. Add label above Save button (SAFE VERSION) ===
+            # Remove previous label if exists
+            if hasattr(self.parent, 'baseline_reference_label') and self.parent.baseline_reference_label:
+                # Try to remove from its current layout
+                if self.parent.baseline_reference_label.parent():
+                    parent_layout = self.parent.baseline_reference_label.parent().layout()
+                    if parent_layout:
+                        parent_layout.removeWidget(self.parent.baseline_reference_label)
+                self.parent.baseline_reference_label.deleteLater()
+                self.parent.baseline_reference_label = None
+
+            # Find the layout that contains the save_button
+            bottom_layout = None
+            if self.parent.save_button:
+                widget = self.parent.save_button
+                while widget and not bottom_layout:
+                    if widget.layout() and isinstance(widget.layout(), QHBoxLayout):
+                        # Check if save_button is in this layout
+                        for i in range(widget.layout().count()):
+                            if widget.layout().itemAt(i).widget() == self.parent.save_button:
+                                bottom_layout = widget.layout()
+                                break
+                    widget = widget.parent()
+
+            # Fallback: try bottom_section layout
+            if not bottom_layout and hasattr(self.parent, 'bottom_section') and self.parent.bottom_section.layout():
+                bottom_layout = self.parent.bottom_section.layout()
+
+            # Create new label
+            label_text = f"Reference Baseline: <b>{baseline_name}</b> (from {selected_json})"
+            self.parent.baseline_reference_label = QLabel(label_text)
+            self.parent.baseline_reference_label.setAlignment(Qt.AlignCenter)
+            self.parent.baseline_reference_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    font-weight: bold;
+                    color: #4A148C;
+                    padding: 8px;
+                    background-color: #E8DCF5;
+                    border-radius: 6px;
+                    margin: 4px 0;
+                }
+            """)
+
+            # Insert before Save button
+            if bottom_layout and self.parent.save_button:
+                save_index = bottom_layout.indexOf(self.parent.save_button)
+                if save_index != -1:
+                    bottom_layout.insertWidget(save_index, self.parent.baseline_reference_label)
+                else:
+                    bottom_layout.insertWidget(0, self.parent.baseline_reference_label)  # fallback to start
+            else:
+                # Final fallback: show in message log
+                self.parent.message_text.append(f"Reference Baseline: {baseline_name} (from {selected_json})")
+
+            self.parent.message_text.append(f"Loaded and plotted baseline: {baseline_name}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Load Error", f"Failed to load baseline JSON:\n{str(e)}")
+            self.parent.message_text.append(f"Error loading baseline: {str(e)}")
+
+    # =========================================================================================================================================
     def validate_and_accept(self):
         layer_name = self.name_edit.text().strip()
         if not layer_name:
             QMessageBox.warning(self, "Input Required", "Please enter a layer name.")
             return
 
-        # Optional: prevent global name conflict
         base_dir = r"E:\3D_Tool\user\worksheets"
-        if os.path.exists(os.path.join(base_dir, layer_name)):
+        construction_base = os.path.join(base_dir, self.parent.current_worksheet_name, "construction")
+        if os.path.exists(os.path.join(construction_base, layer_name)):
             QMessageBox.warning(self, "Name Exists",
                                 "A construction layer with this name already exists.\nPlease enter another name.")
             return
 
         self.accept()
 
+    # =========================================================================================================================================
     def get_data(self):
         ref_layer = self.ref_layer_combo.currentText()
         base_line_json = self.base_lines_combo.currentText()
-
         return {
             'layer_name': self.name_edit.text().strip(),
             'is_road': self.road_radio.isChecked(),
             'is_bridge': self.bridge_radio.isChecked(),
             'reference_layer': None if ref_layer in ("None", "(No designs folder)", "(No design layers found)") else ref_layer,
-            'base_lines_layer': None if base_line_json == "None" else base_line_json  # Returns filename like "surface_baseline.json"
+            'base_lines_layer': None if base_line_json == "None" else base_line_json
         }
-    
-    
 # ===========================================================================================================================
 # ** CREATE PROJECT DIALOG - IMPROVED VERSION (Supports File + Folder Selection) **
 # ===========================================================================================================================
@@ -1760,117 +2004,144 @@ class CreateProjectDialog(QDialog):
             "file_count": len(self.selected_files)
         }
 
+
 # ===========================================================================================================================
-# ** EXISTING WORKSHEET DIALOG - SCANS FOLDERS, LOADS worksheet_config.txt, AND SUPPORTS DELETION **
+# ** EXISTING WORKSHEET DIALOG - MULTI-PAGE VERSION **
 # ===========================================================================================================================
 class ExistingWorksheetDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Open Existing Worksheet")
         self.setModal(True)
-        self.resize(700, 550)
-        self.selected_worksheet = None
+        self.resize(800, 600)
 
-        # Get the base worksheets directory from parent (PointCloudViewer)
+        self.parent = parent  # PointCloudViewer instance
         if parent and hasattr(parent, 'WORKSHEETS_BASE_DIR'):
             self.base_dir = parent.WORKSHEETS_BASE_DIR
         else:
-            self.base_dir = r"E:\3D_Tool\user\worksheets"  # fallback
+            self.base_dir = r"E:\3D_Tool\user\worksheets"
 
-        # Main layout
+        # Final selected data
+        self.selected_worksheet_data = None
+        self.selected_worksheet_folder = None
+        self.selected_subfolder_type = None   # "designs", "measurements", "construction"
+        self.selected_layer_name = None
+
+        self.setup_ui()
+
+    def setup_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(15)
 
-        # Title
-        title = QLabel("Select an Existing Worksheet")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("""
-            font-size: 20px;
-            font-weight: bold;
-            color: #4A148C;
-            padding: 10px;
-            background-color: #E8EAF6;
-            border-radius: 8px;
+        # Dynamic title
+        self.title_label = QLabel("Select an Existing Worksheet")
+        self.title_label.setAlignment(Qt.AlignCenter)
+        self.title_label.setStyleSheet("""
+            font-size: 20px; font-weight: bold; color: #4A148C;
+            padding: 10px; background-color: #E8EAF6; border-radius: 8px;
         """)
-        main_layout.addWidget(title)
+        main_layout.addWidget(self.title_label)
 
-        # Scrollable area
+        # Pages
+        self.page1 = self.create_page1()
+        self.page2 = self.create_page2()
+        self.page3 = self.create_page3()
+
+        main_layout.addWidget(self.page1)
+        main_layout.addWidget(self.page2)
+        main_layout.addWidget(self.page3)
+
+        self.page2.hide()
+        self.page3.hide()
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        self.back_btn = QPushButton("Back")
+        self.back_btn.setFixedWidth(100)
+        self.back_btn.clicked.connect(self.go_back)
+        self.back_btn.hide()
+
+        self.next_btn = QPushButton("Next")
+        self.next_btn.setFixedWidth(120)
+        self.next_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #AB47BC, stop:1 #8E24AA);
+                color: white; border: none; padding: 12px;
+                border-radius: 20px; font-weight: bold;
+            }
+        """)
+        self.next_btn.clicked.connect(self.go_next)
+
+        self.open_btn = QPushButton("Open Selected")
+        self.open_btn.setFixedWidth(160)
+        self.open_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #AB47BC, stop:1 #8E24AA);
+                color: white; border: none; padding: 12px;
+                border-radius: 20px; font-weight: bold;
+            }
+        """)
+        self.open_btn.clicked.connect(self.final_open)
+        self.open_btn.hide()  # Only shown on page 3
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedWidth(100)
+        cancel_btn.clicked.connect(self.reject)
+
+        btn_layout.addWidget(self.back_btn)
+        btn_layout.addWidget(self.next_btn)
+        btn_layout.addWidget(self.open_btn)
+        btn_layout.addWidget(cancel_btn)
+
+        main_layout.addLayout(btn_layout)
+
+    # ------------------------------------------------------------------
+    # Page 1: List of worksheets
+    # ------------------------------------------------------------------
+    def create_page1(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("""
-            QScrollArea {
-                border: 2px solid #BA68C8;
-                border-radius: 10px;
-                background-color: white;
-            }
-        """)
+        scroll.setStyleSheet("QScrollArea { border: 2px solid #BA68C8; border-radius: 10px; background:white; }")
 
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setContentsMargins(15, 15, 15, 15)
-        scroll_layout.setSpacing(12)
-        scroll_layout.setAlignment(Qt.AlignTop)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setAlignment(Qt.AlignTop)
+        content_layout.setSpacing(12)
 
-        # Group box
-        self.radio_group_box = QGroupBox("Available Worksheets")
-        self.radio_group_box.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 14px;
-                color: #4A148C;
-                border: 2px solid #9C27B0;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 15px;
-                padding: 0 8px;
-                background-color: white;
-            }
-        """)
+        self.ws_radio_group = QButtonGroup()
+        self.ws_radio_group.setExclusive(True)
+        self.ws_items = []  # (radio, data, folder_name, item_widget)
 
-        radio_layout = QVBoxLayout(self.radio_group_box)
-        radio_layout.setSpacing(10)
-        radio_layout.setContentsMargins(10, 10, 10, 10)
-
-        # Button group for mutual exclusivity
-        self.button_group = QButtonGroup()
-        self.button_group.setExclusive(True)
-
-        self.worksheets = []
-        self.radio_buttons = []  # Will store (radio, data, folder_name, item_widget)
-
-        # === SCAN WORKSHEET FOLDERS ===
         if not os.path.exists(self.base_dir):
-            no_dir_label = QLabel(f"Worksheets directory not found:\n{self.base_dir}")
-            no_dir_label.setStyleSheet("color: red; font-style: italic;")
-            radio_layout.addWidget(no_dir_label)
+            lbl = QLabel(f"Directory not found:\n{self.base_dir}")
+            lbl.setStyleSheet("color:red;")
+            content_layout.addWidget(lbl)
         else:
-            found_any = False
+            found = False
             for folder_name in sorted(os.listdir(self.base_dir)):
                 folder_path = os.path.join(self.base_dir, folder_name)
                 if not os.path.isdir(folder_path):
                     continue
-
                 config_path = os.path.join(folder_path, "worksheet_config.txt")
                 if not os.path.exists(config_path):
-                    continue  # Skip if no config file
-
+                    continue
                 try:
                     with open(config_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-
-                    found_any = True
-                    self.worksheets.append(data)
+                    found = True
 
                     name = data.get("worksheet_name", folder_name)
-                    proj = data.get("project_name", "No Project")
-                    if proj == "None" or not proj:
+                    proj = data.get("project_name", "None")
+                    if proj in ("None", ""):
                         proj = "No Project"
-
                     date_str = data.get("created_at", "")
                     if date_str:
                         try:
@@ -1881,186 +2152,193 @@ class ExistingWorksheetDialog(QDialog):
                     else:
                         date = "Unknown"
 
-                    # Create radio button with rich info
                     radio = QRadioButton()
-                    label_text = f"<b>{name}</b><br>"
-                    label_text += f"<small>Project: <i>{proj}</i> | Created: {date}<br>"
-                    label_text += f"Folder: {folder_name}</small>"
-
-                    label = QLabel(label_text)
+                    text = f"<b>{name}</b><br>"
+                    text += f"<small>Project: <i>{proj}</i> | Created: {date}<br>Folder: {folder_name}</small>"
+                    label = QLabel(text)
                     label.setWordWrap(True)
                     label.setStyleSheet("""
-                        QLabel {
-                            background-color: #F8E8FF;
-                            padding: 14px;
-                            border-radius: 10px;
-                            border: 1px solid #E1BEE7;
-                        }
+                        QLabel { background:#F8E8FF; padding:14px; border-radius:10px;
+                                 border:1px solid #E1BEE7; }
                     """)
 
-                    # Container widget
                     item_widget = QWidget()
                     item_layout = QHBoxLayout(item_widget)
-                    item_layout.setContentsMargins(0, 0, 0, 0)
+                    item_layout.setContentsMargins(0,0,0,0)
                     item_layout.addWidget(radio)
                     item_layout.addWidget(label, 1)
 
-                    radio_layout.addWidget(item_widget)
-
-                    # Add to button group and our tracking list
-                    self.button_group.addButton(radio)
-                    self.radio_buttons.append((radio, data, folder_name, item_widget))
-
+                    content_layout.addWidget(item_widget)
+                    self.ws_radio_group.addButton(radio)
+                    self.ws_items.append((radio, data, folder_name, item_widget))
                 except Exception as e:
-                    error_item = QLabel(f"⚠ Error loading {folder_name}: {str(e)}")
-                    error_item.setStyleSheet("color: orange; font-size: 12px;")
-                    radio_layout.addWidget(error_item)
+                    err_lbl = QLabel(f"Warning: Error loading {folder_name}: {e}")
+                    err_lbl.setStyleSheet("color:orange;")
+                    content_layout.addWidget(err_lbl)
 
-            if not found_any:
-                no_ws_label = QLabel("No worksheets found in the directory.")
-                no_ws_label.setStyleSheet("color: #666; font-style: italic; padding: 20px;")
-                radio_layout.addWidget(no_ws_label)
+            if not found:
+                content_layout.addWidget(QLabel("No worksheets found in the directory."))
 
-        scroll_layout.addWidget(self.radio_group_box)
-        scroll_layout.addStretch()
-        scroll.setWidget(scroll_content)
-        main_layout.addWidget(scroll)
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+        return widget
 
-        # Bottom buttons
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
+    # ------------------------------------------------------------------
+    # Page 2: Actual existing subfolders
+    # ------------------------------------------------------------------
+    def create_page2(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
 
-        open_btn = QPushButton("Open Selected")
-        open_btn.setFixedWidth(140)
-        open_btn.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                        stop:0 #AB47BC, stop:1 #8E24AA);
-                color: white;
-                border: none;
-                padding: 12px;
-                border-radius: 20px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                        stop:0 #9C27B0, stop:1 #7B1FA2);
-            }
+        self.subfolder_list = QListWidget()
+        self.subfolder_list.setStyleSheet("""
+            QListWidget::item { padding: 12px; border-bottom: 1px solid #E0E0E0; }
+            QListWidget::item:selected { background: #BBDEFB; color: black; }
         """)
-        open_btn.clicked.connect(self.open_selected_worksheet)
-        btn_layout.addWidget(open_btn)
+        layout.addWidget(QLabel("Select a section folder:"))
+        layout.addWidget(self.subfolder_list)
+        return widget
 
-        delete_btn = QPushButton("Delete Selected Worksheet")
-        delete_btn.setFixedWidth(200)
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                        stop:0 #FF5252, stop:1 #D32F2F);
-                color: white;
-                border: none;
-                padding: 12px;
-                border-radius: 20px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                        stop:0 #F44336, stop:1 #C62828);
-            }
+    # ------------------------------------------------------------------
+    # Page 3: Layer folders inside selected subfolder
+    # ------------------------------------------------------------------
+    def create_page3(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        self.layer_list = QListWidget()
+        self.layer_list.setStyleSheet("""
+            QListWidget::item { padding: 14px; border-bottom: 1px solid #E0E0E0; font-size: 14px; }
+            QListWidget::item:selected { background: #BBDEFB; color: black; }
         """)
-        delete_btn.clicked.connect(self.delete_selected_worksheet)
-        btn_layout.addWidget(delete_btn)
+        self.layer_list.itemDoubleClicked.connect(self.final_open)  # Double-click to open
+        layout.addWidget(QLabel("Select a layer folder:"))
+        layout.addWidget(self.layer_list)
+        return widget
 
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFixedWidth(100)
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                        stop:0 #E1BEE7, stop:1 #CE93D8);
-                color: #333;
-                border: none;
-                padding: 12px;
-                border-radius: 20px;
-                font-weight: bold;
-            }
-        """)
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
-
-        main_layout.addLayout(btn_layout)
-
-    def get_selected_folder_name(self):
-        """Helper to get the folder name of the currently selected worksheet"""
-        selected_button = self.button_group.checkedButton()
-        if not selected_button:
-            return None
-        for radio, data, folder_name, item_widget in self.radio_buttons:
-            if radio is selected_button:
-                return folder_name
-        return None
-
-    def delete_selected_worksheet(self):
-        """Delete the entire worksheet folder after confirmation"""
-        folder_name = self.get_selected_folder_name()
-        if not folder_name:
-            QMessageBox.information(self, "No Selection", "Please select a worksheet to delete.")
-            return
-
-        worksheet_name = "Unknown"
-        for radio, data, fn, item_widget in self.radio_buttons:
-            if fn == folder_name:
-                worksheet_name = data.get("worksheet_name", folder_name)
-                break
-
-        reply = QMessageBox.question(
-            self,
-            "Confirm Deletion",
-            f"Are you sure you want to <b>permanently delete</b> the worksheet:<br><br>"
-            f"<b>{worksheet_name}</b><br>(Folder: {folder_name})<br><br>"
-            f"All files in this worksheet folder will be deleted.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-
-        if reply != QMessageBox.Yes:
-            return
-
-        folder_path = os.path.join(self.base_dir, folder_name)
-
-        try:
-            import shutil
-            shutil.rmtree(folder_path)  # Deletes the entire folder and contents
-
-            # Remove from UI
-            selected_button = self.button_group.checkedButton()
-            for radio, data, fn, item_widget in self.radio_buttons[:]:
-                if fn == folder_name:
-                    self.radio_buttons.remove((radio, data, fn, item_widget))
-                    self.button_group.removeButton(radio)
-                    item_widget.setParent(None)  # Removes from layout
-                    radio.deleteLater()
-                    item_widget.deleteLater()
-                    break
-
-            QMessageBox.information(self, "Deleted", f"Worksheet '{worksheet_name}' has been successfully deleted.")
-        except Exception as e:
-            QMessageBox.critical(self, "Deletion Failed", f"Could not delete the worksheet folder:\n\n{str(e)}")
-
-    def open_selected_worksheet(self):
-        """Handle opening the selected worksheet"""
-        selected_button = self.button_group.checkedButton()
-        if not selected_button:
-            QMessageBox.information(self, "No Selection", "Please select a worksheet to open.")
-            return
-
-        for radio, data, folder_name, item_widget in self.radio_buttons:
-            if radio is selected_button:
-                self.selected_worksheet = data
-                self.accept()
+    # ------------------------------------------------------------------
+    # Navigation: Next button logic
+    # ------------------------------------------------------------------
+    def go_next(self):
+        if self.page1.isVisible():
+            # From Page 1 → Page 2
+            selected_radio = self.ws_radio_group.checkedButton()
+            if not selected_radio:
+                QMessageBox.information(self, "No Selection", "Please select a worksheet.")
                 return
 
-        QMessageBox.warning(self, "Error", "Could not retrieve selected worksheet data.")
+            for radio, data, folder_name, _ in self.ws_items:
+                if radio is selected_radio:
+                    self.selected_worksheet_data = data
+                    self.selected_worksheet_folder = os.path.join(self.base_dir, folder_name)
+                    worksheet_name = data.get("worksheet_name", folder_name)
 
+                    # Find actual subfolders that exist
+                    possible_subfolders = ["designs", "measurements", "construction"]
+                    existing = []
+                    for sf in possible_subfolders:
+                        path = os.path.join(self.selected_worksheet_folder, sf)
+                        if os.path.isdir(path):
+                            existing.append(sf)
 
+                    self.subfolder_list.clear()
+                    if existing:
+                        for sf in existing:
+                            self.subfolder_list.addItem(sf)
+                    else:
+                        self.subfolder_list.addItem("(No sections found)")
+
+                    self.page1.hide()
+                    self.page2.show()
+                    self.back_btn.show()
+                    self.next_btn.show()
+                    self.open_btn.hide()
+                    self.title_label.setText(f"{worksheet_name} → Select Section")
+                    return
+
+        elif self.page2.isVisible():
+            # From Page 2 → Page 3
+            item = self.subfolder_list.currentItem()
+            if not item or item.text().startswith("("):
+                QMessageBox.information(self, "No Selection", "Please select a valid section folder.")
+                return
+
+            self.selected_subfolder_type = item.text()
+            sub_path = os.path.join(self.selected_worksheet_folder, self.selected_subfolder_type)
+
+            self.layer_list.clear()
+            try:
+                layers = [d for d in os.listdir(sub_path)
+                          if os.path.isdir(os.path.join(sub_path, d))]
+                layers.sort()
+                if layers:
+                    for layer in layers:
+                        self.layer_list.addItem(layer)
+                else:
+                    self.layer_list.addItem("(No layers in this section)")
+            except Exception as e:
+                self.layer_list.addItem(f"Error reading folder: {e}")
+
+            self.page2.hide()
+            self.page3.show()
+            self.next_btn.hide()
+            self.open_btn.show()
+            self.title_label.setText(f"Select Layer in '{self.selected_subfolder_type}'")
+
+    # ------------------------------------------------------------------
+    # Back button
+    # ------------------------------------------------------------------
+    def go_back(self):
+        if self.page3.isVisible():
+            self.page3.hide()
+            self.page2.show()
+            self.next_btn.show()
+            self.open_btn.hide()
+            self.title_label.setText(f"{self.selected_worksheet_data.get('worksheet_name', '')} → Select Section")
+        elif self.page2.isVisible():
+            self.page2.hide()
+            self.page1.show()
+            self.back_btn.hide()
+            self.next_btn.show()
+            self.open_btn.hide()
+            self.title_label.setText("Select an Existing Worksheet")
+
+    # ------------------------------------------------------------------
+    # Final open
+    # ------------------------------------------------------------------
+    def final_open(self):
+        if not self.page3.isVisible():
+            self.go_next()
+            return
+
+        item = self.layer_list.currentItem()
+        if not item or item.text().startswith("("):
+            QMessageBox.information(self, "No Layer", "Please select a valid layer folder.")
+            return
+
+        self.selected_layer_name = item.text()
+        self.accept()
+
+    # ------------------------------------------------------------------
+    # Return selected data to main window
+    # ------------------------------------------------------------------
+    def get_selected_data(self):
+        if not all([self.selected_worksheet_data, self.selected_subfolder_type, self.selected_layer_name]):
+            return None
+
+        full_path = os.path.join(
+            self.selected_worksheet_folder,
+            self.selected_subfolder_type,
+            self.selected_layer_name
+        )
+
+        return {
+            "worksheet_data": self.selected_worksheet_data,
+            "worksheet_name": self.selected_worksheet_data.get("worksheet_name"),
+            "subfolder_type": self.selected_subfolder_type,
+            "layer_name": self.selected_layer_name,
+            "full_layer_path": full_path
+        }
 # =================================================================================================================================================================
 #                                                                    ** Updated WorksheetNewDialog (Layer Name - No Fallback) **
 # =================================================================================================================================================================

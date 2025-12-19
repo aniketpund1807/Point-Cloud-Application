@@ -1962,3 +1962,6 @@ class ApplicationUI(QMainWindow):
         elif dimension == "2D":
             if self.two_D_layers_layout:
                 self.two_D_layers_layout.insertWidget(self.two_D_layers_layout.count() - 1, label)
+
+
+

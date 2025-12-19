@@ -68,6 +68,7 @@ class PointCloudViewer(ApplicationUI):
         # NEW: 3D curve support
         self.surface_line_3d_points = []
 
+        self.bottom_button_layout = None   # Add for the baseline name show in bottom section
 
         # NEW: Unified plane support for ALL baselines
         self.baseline_plane_actors = []     # Stores all plane actors (individual + combined)
@@ -969,8 +970,8 @@ class PointCloudViewer(ApplicationUI):
             self.save_button.setText("Save Construction")
 
             # 9. Add to layers panel
-            self.add_layer_to_panel(layer_name, "3D")
-            self.three_D_frame.setVisible(True)
+            self.add_layer_to_panel(layer_name, "2D")
+            self.two_D_frame.setVisible(True)
 
             # 10. Feedback
             self.message_text.append(f"Construction layer '{layer_name}' ({construction_type}) created successfully!")
@@ -1335,55 +1336,39 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append("No material lines to save.")
 
     # ===========================================================================================================================================================
+
     def open_existing_worksheet(self):
         dialog = ExistingWorksheetDialog(self)
-        if dialog.exec_() == QDialog.Accepted and dialog.selected_worksheet:
-            ws = dialog.selected_worksheet
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_selected_data()
+            if not data:
+                return
 
-            # Extract key fields from config
-            worksheet_name = ws.get("worksheet_name")
-            project_name = ws.get("project_name")
-            worksheet_type = ws.get("worksheet_type", "Unknown")      # "Design" or "Measurement"
-            worksheet_category = ws.get("worksheet_category", "None") # "Road", "Bridge", "Other", etc.
-            dimension = ws.get("dimension", "2D")                     # For messages
+            # Load worksheet config
+            config = data["worksheet_data"]
+            self.current_worksheet_name = config.get("worksheet_name")
+            self.current_project_name = config.get("project_name")
+            self.current_worksheet_data = config
+            self.current_layer_name = data["layer_name"]
 
-            # Set current worksheet info
-            self.current_worksheet_name = worksheet_name
-            self.current_project_name = project_name if project_name and project_name.strip() and project_name != "None" else None
-            self.current_worksheet_data = ws.copy()
+            # Update UI
+            self.display_current_worksheet(config)
 
-            self.display_current_worksheet(ws)
-            self.message_text.append(f"Opened worksheet: {worksheet_name}")
+            dimension = config.get("dimension", "2D")
+            category = config.get("worksheet_category", "None")
 
-
-            # === AUTO-LOAD POINT CLOUD FROM LINKED PROJECT ===
-            if self.current_project_name:
-                project_folder = os.path.join(self.PROJECTS_BASE_DIR, self.current_project_name)
-                config_path = os.path.join(project_folder, "project_config.txt")
-
-                if os.path.exists(config_path):
-                    try:
-                        with open(config_path, 'r', encoding='utf-8') as f:
-                            proj_config = json.load(f)
-
-                        files = proj_config.get("pointcloud_files", [])
-                        if files:
-                            self.message_text.append(f"Auto-loading {len(files)} point cloud file(s) from project '{self.current_project_name}'...")
-                            self.load_point_cloud_files(files)
-                        else:
-                            self.message_text.append(f"Project '{self.current_project_name}' found, but no point cloud files linked.")
-
-                    except Exception as e:
-                        self.message_text.append(f"Error reading project config '{config_path}': {str(e)}")
-                else:
-                    self.message_text.append(f"Project folder or config not found:\n{config_path}")
+            # Show correct panels
+            if dimension == "3D":
+                self.three_D_frame.setVisible(True)
+                self.two_D_frame.setVisible(False)
             else:
-                self.message_text.append("No project linked to this worksheet.")
+                self.three_D_frame.setVisible(False)
+                self.two_D_frame.setVisible(True)
 
-            # === NEW: UI VISIBILITY LOGIC BASED ON worksheet_type AND worksheet_category ===
-            # Start by hiding everything
-            self.bottom_section.setVisible(False)
+            # Show bottom section only for Road/Bridge design layers
+            self.bottom_section.setVisible(category in ["Road", "Bridge"])
 
+            # Show correct baseline controls
             self.surface_container.setVisible(False)
             self.construction_container.setVisible(False)
             self.road_surface_container.setVisible(False)
@@ -1391,69 +1376,35 @@ class PointCloudViewer(ApplicationUI):
             self.deck_line_container.setVisible(False)
             self.projection_container.setVisible(False)
             self.construction_dots_container.setVisible(False)
-            if hasattr(self, 'bridge_zero_container'):
-                self.bridge_zero_container.setVisible(False)
 
-            # Hide action buttons initially
-            self.preview_button.setVisible(False)
-            self.threed_map_button.setVisible(False)
-            self.save_button.setVisible(False)
+            if category == "Road":
+                self.surface_container.setVisible(True)
+                self.construction_container.setVisible(True)
+                self.road_surface_container.setVisible(True)
+                self.zero_container.setVisible(True)
+            elif category == "Bridge":
+                self.deck_line_container.setVisible(True)
+                self.projection_container.setVisible(True)
+                self.construction_dots_container.setVisible(True)
 
-            if worksheet_type == "Design":
-                # Only Design worksheets show baselines and bottom section
-                self.bottom_section.setVisible(True)
+            # Show action buttons
+            self.preview_button.setVisible(True)
+            self.threed_map_button.setVisible(True)
+            self.save_button.setVisible(True)
 
-                if worksheet_category == "Road":
-                    self.surface_container.setVisible(True)
-                    self.construction_container.setVisible(True)
-                    self.road_surface_container.setVisible(True)
-                    self.zero_container.setVisible(True)
+            # Auto-load point cloud if linked
+            pc_file = config.get("point_cloud_file")
+            if pc_file and os.path.exists(pc_file):
+                self.load_point_cloud_from_path(pc_file)
 
-                    self.message_text.append(f"Mode Activated: {dimension} - ROAD Mode")
+            # Add layer to panel
+            self.add_layer_to_panel(data["layer_name"], dimension)
 
-                    # Action buttons
-                    self.preview_button.setVisible(True)
-                    self.threed_map_button.setVisible(True)
-                    self.save_button.setVisible(True)
-
-                    # Auto-check zero line
-                    if not self.zero_line_set:
-                        self.zero_line.setChecked(True)
-
-                elif worksheet_category == "Bridge":
-                    self.deck_line_container.setVisible(True)
-                    self.projection_container.setVisible(True)
-                    self.construction_dots_container.setVisible(True)
-                    if hasattr(self, 'bridge_zero_container'):
-                        self.bridge_zero_container.setVisible(True)
-
-                    self.message_text.append(f"Mode Activated: {dimension} - BRIDGE Mode")
-
-                    # Action buttons
-                    self.preview_button.setVisible(True)
-                    self.threed_map_button.setVisible(True)
-                    self.save_button.setVisible(True)
-
-                    # Auto-check bridge zero line
-                    if hasattr(self, 'bridge_zero_line') and not self.zero_line_set:
-                        self.bridge_zero_line.setChecked(True)
-
-                else:
-                    self.message_text.append(f"Mode Activated: {dimension} - General Mode (Design)")
-
-            elif worksheet_type == "Measurement":
-                # Measurement mode: hide bottom section completely
-                self.message_text.append("Mode Activated: 3D - MEASUREMENT Mode")
-                # No baselines or action buttons shown
-
-            else:
-                self.message_text.append(f"Mode Activated: {dimension} - Unknown Type")
-
-            # Refresh rendering
-            self.canvas.draw()
-            if hasattr(self, 'vtk_widget'):
-                self.vtk_widget.GetRenderWindow().Render()
-                
+            self.message_text.append(
+                f"Opened worksheet: {self.current_worksheet_name}\n"
+                f"→ Section: {data['subfolder_type']}\n"
+                f"→ Layer: {data['layer_name']}"
+            )
     # =======================================================================================================================================
     def load_point_cloud_files(self, file_list):
         """Load multiple point cloud files (merge or first one) - currently loads first file with progress bar"""
@@ -1889,127 +1840,114 @@ class PointCloudViewer(ApplicationUI):
     # =======================================================================================================================================
     # UPDATE CHAINAGE TICKS ON GRAPHS
     def update_chainage_ticks(self):
-        if not self.zero_line_set or self.zero_interval is None:
+        """Update X-axis ticks on main graph and scale with safe integer chainage labels"""
+        if not self.zero_line_set or not hasattr(self, 'zero_interval') or self.zero_interval <= 0:
             return
-        
-        # Get the start KM value from zero line configuration
-        start_km = self.zero_start_km if hasattr(self, 'zero_start_km') else 0
-        
-        # Calculate tick positions along the distance
+
+        # Force interval to integer (it should always be whole meters like 20, 50, etc.)
+        interval = int(self.zero_interval)
+        start_km = getattr(self, 'zero_start_km', 0) if hasattr(self, 'zero_start_km') and self.zero_start_km is not None else 0
+
         tick_positions = []
         tick_labels = []
-        
-        # Create ticks at each interval
+
         current_pos = 0
-        while current_pos <= self.total_distance:
+        while current_pos <= self.total_distance + interval:
             tick_positions.append(current_pos)
-            
-            # Calculate the interval value
-            interval_value = int(current_pos / self.zero_interval) * self.zero_interval
-            
-            # Format as KM+Interval (e.g., 101+000, 101+020, etc.)
-            tick_labels.append(f"{start_km}+{interval_value:03d}")
-            
-            current_pos += self.zero_interval
-        
-        # Update the main graph X-axis
+
+            # Calculate exact multiple of interval
+            interval_number = int(round(current_pos / interval))
+            interval_value_meters = interval_number * interval
+
+            # Format as KM + 3-digit meters (e.g., 101+020)
+            tick_labels.append(f"{start_km}+{interval_value_meters:03d}")
+
+            current_pos += interval
+
+        # Update main graph
         self.ax.set_xticks(tick_positions)
         self.ax.set_xticklabels(tick_labels)
-        
-        # Update scale graph if it exists
+
+        # Update scale graph if exists
         if hasattr(self, 'scale_ax') and self.scale_ax is not None:
-            self.update_scale_ticks()  # This will use the same format
-        
-        # Redraw main canvas
+            self.scale_ax.set_xticks(tick_positions)
+            self.scale_ax.set_xticklabels(tick_labels, rotation=30, ha='right')
+
         self.canvas.draw()
+        if hasattr(self, 'scale_canvas'):
+            self.scale_canvas.draw()
         self.figure.tight_layout()
+
 
     # =======================================================================================================================================
     # UPDATE SCALE MARKER BASED ON SLIDER
     def update_scale_marker(self):
+        """Update red marker and chainage label when volume slider moves"""
+        if not self.zero_line_set or not hasattr(self, 'scale_ax'):
+            return
+
         value = self.volume_slider.value()
         pos = value / 100.0 * self.total_distance
-        
-        # Update marker position
+
+        # Update vertical red line
         self.scale_marker.set_data([pos, pos], [0, 1])
-        
-        # Calculate and display interval value at marker position
-        if self.zero_line_set and hasattr(self, 'scale_ax'):
-            # Calculate interval value (round to nearest interval)
-            if self.zero_interval > 0:
-                interval_value = int(round(pos / self.zero_interval)) * self.zero_interval
-            else:
-                interval_value = pos
-                
-            # Format the marker label
-            if hasattr(self, 'zero_start_km') and self.zero_start_km is not None:
-                marker_label = f"Chainage: {self.zero_start_km}+{interval_value:03d}"
-            else:
-                marker_label = f"Distance: {interval_value:.1f}m"
-            
-            # Remove previous marker label if exists
-            if hasattr(self, 'scale_marker_label'):
-                try:
-                    self.scale_marker_label.remove()
-                except:
-                    pass
-            
-            # Add new marker label at a better position
-            # Position it at the top of the scale but within bounds
-            self.scale_marker_label = self.scale_ax.text(
-                pos, 1.1, marker_label,  # Positioned at y=1.1 (inside the plot area)
-                color='red', fontsize=10, fontweight='bold',
-                ha='center', va='bottom',
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", 
-                        edgecolor="red", alpha=0.9, linewidth=1)
-            )
-            
-            # Also add a small vertical line at the bottom to indicate position
-            if not hasattr(self, 'scale_marker_bottom'):
-                self.scale_marker_bottom, = self.scale_ax.plot(
-                    [pos, pos], [0, 0.1], color='red', linewidth=2
-                )
-            else:
-                self.scale_marker_bottom.set_data([pos, pos], [0, 0.1])
-        
+
+        # === SAFE CHAINAGE LABEL ===
+        interval = int(self.zero_interval)
+        start_km = getattr(self, 'zero_start_km', 0) if hasattr(self, 'zero_start_km') else 0
+
+        # Find nearest interval mark
+        interval_number = int(round(pos / interval))
+        interval_value_meters = interval_number * interval
+
+        marker_label = f"Chainage: {start_km}+{interval_value_meters:03d}"
+
+        # Remove old label
+        if hasattr(self, 'scale_marker_label'):
+            try:
+                self.scale_marker_label.remove()
+            except:
+                pass
+
+        # Add new label
+        self.scale_marker_label = self.scale_ax.text(
+            pos, 1.1, marker_label,
+            color='red', fontsize=10, fontweight='bold',
+            ha='center', va='bottom',
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
+                      edgecolor="red", alpha=0.9, linewidth=1)
+        )
+
+        # Update bottom indicator line
+        if not hasattr(self, 'scale_marker_bottom'):
+            self.scale_marker_bottom, = self.scale_ax.plot([pos, pos], [0, 0.1], color='red', linewidth=2)
+        else:
+            self.scale_marker_bottom.set_data([pos, pos], [0, 0.1])
+
         self.scale_canvas.draw()
 
     # =======================================================================================================================================
-    # # VOLUME CHANGED (UPDATE SCALE MARKER)
-    # def volume_changed(self, value):
-    #     print(f"Volume slider changed to: {value}%")
-    #     if self.zero_line_set:
-    #         self.update_scale_marker()
-    #         # Don't call update_main_graph_marker here as it's now called in scroll_graph_with_slider
-        
-    #     # Always scroll the graph regardless of zero line state
-    #     self.scroll_graph_with_slider(value)
-
-
-
-
-    # =======================================================================================================================================
     def update_main_graph_marker(self, slider_value):
-        """Update the main graph based on scale slider position"""
+        """Update orange vertical marker on main 2D graph"""
         if not self.zero_line_set:
             return
-        
-        # Calculate position along the distance
+
         pos = slider_value / 100.0 * self.total_distance
-        
-        # Add/update vertical line marker
+
+        # Update vertical line
         if not hasattr(self, 'main_graph_marker'):
-            self.main_graph_marker = self.ax.axvline(x=pos, color='orange', 
-                                                    linestyle='--', alpha=0.7, linewidth=2)
+            self.main_graph_marker = self.ax.axvline(x=pos, color='orange',
+                                                     linestyle='--', alpha=0.7, linewidth=2)
         else:
             self.main_graph_marker.set_xdata([pos, pos])
-        
-        # Add/update label with KM+Interval format
+
+        # Get safe chainage label
         chainage_label = self.get_chainage_label(pos)
-        
+
+        # Update label
         if not hasattr(self, 'main_graph_marker_label'):
             self.main_graph_marker_label = self.ax.text(
-                pos, self.ax.get_ylim()[1] * 0.95, 
+                pos, self.ax.get_ylim()[1] * 0.95,
                 f"← Chainage: {chainage_label}",
                 color='orange', fontweight='bold', ha='right',
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8)
@@ -2017,8 +1955,7 @@ class PointCloudViewer(ApplicationUI):
         else:
             self.main_graph_marker_label.set_position((pos, self.ax.get_ylim()[1] * 0.95))
             self.main_graph_marker_label.set_text(f"← Chainage: {chainage_label}")
-        
-        # Ensure the canvas is redrawn
+
         self.canvas.draw_idle()
 
     # =======================================================================================================================================
@@ -2064,19 +2001,17 @@ class PointCloudViewer(ApplicationUI):
     # =======================================================================================================================================
     # Add a helper method to format chainage labels:
     def get_chainage_label(self, position):
-        """Format chainage label for a given position (for main graph marker)"""
-        if not self.zero_line_set or not hasattr(self, 'zero_start_km') or self.zero_start_km is None:
+        """Return formatted chainage string like '101+020' for any position"""
+        if not self.zero_line_set or not hasattr(self, 'zero_interval') or self.zero_interval <= 0:
             return f"{position:.1f}m"
-        
-        if self.zero_interval <= 0:
-            return f"{self.zero_start_km}+{position:03.0f}"
-        
-        # Calculate which interval this position falls into
-        interval_number = int(position / self.zero_interval)
-        interval_value = interval_number * self.zero_interval
-        
-        # Format as KM+Interval (3 digits with leading zeros)
-        return f"{self.zero_start_km}+{interval_value:03d}"
+
+        interval = int(self.zero_interval)
+        start_km = getattr(self, 'zero_start_km', 0) if hasattr(self, 'zero_start_km') else 0
+
+        interval_number = int(round(position / interval))
+        interval_value_meters = interval_number * interval
+
+        return f"{start_km}+{interval_value_meters:03d}"
 
     # =======================================================================================================================================
     # UPDATE ZERO ACTORS
@@ -2130,71 +2065,49 @@ class PointCloudViewer(ApplicationUI):
     # =======================================================================================================================================
     # In the update_scale_ticks method, improve the tick labels:
     def update_scale_ticks(self):
-        """Update the scale section with KM+interval values"""
-        if not self.zero_line_set or self.zero_interval is None:
+        """Rebuild the chainage scale below the 3D view with correct KM+Interval labels"""
+        if not self.zero_line_set or not hasattr(self, 'zero_interval') or self.zero_interval <= 0:
             return
-        
-        # Clear any existing labels
+
         self.scale_ax.clear()
-        
-        # Get the start KM value from zero line configuration
-        start_km = self.zero_start_km if hasattr(self, 'zero_start_km') else 0
-        
-        # Calculate the total number of intervals
-        num_intervals = int(self.total_distance / self.zero_interval)
-        
-        # Generate tick positions and labels
+
+        interval = int(self.zero_interval)
+        start_km = getattr(self, 'zero_start_km', 0) if hasattr(self, 'zero_start_km') else 0
+
         tick_positions = []
         tick_labels = []
-        
-        for i in range(num_intervals + 1):
-            # Position along the scale in meters
-            position = i * self.zero_interval
-            if position <= self.total_distance:
-                tick_positions.append(position)
-                
-                # Calculate the interval value
-                interval_value = i * self.zero_interval
-                
-                # Format as KM+Interval (e.g., 101+000, 101+020, etc.)
-                # Interval value should be 3 digits with leading zeros
-                label = f"{start_km}+{interval_value:03d}"
-                tick_labels.append(label)
-        
-        # Recreate the scale line and marker
-        self.scale_line, = self.scale_ax.plot([0, self.total_distance], [0.5, 0.5], 
-                                            color='black', linewidth=3)
-        self.scale_marker, = self.scale_ax.plot([0, 0], [0, 1], color='red', 
-                                            linewidth=2, linestyle='--')
-        
-        # Update the scale graph X-axis
+
+        current_pos = 0
+        while current_pos <= self.total_distance + interval:
+            tick_positions.append(current_pos)
+
+            interval_number = int(round(current_pos / interval))
+            interval_value_meters = interval_number * interval
+
+            tick_labels.append(f"{start_km}+{interval_value_meters:03d}")
+
+            current_pos += interval
+
+        # Rebuild scale line and marker
+        self.scale_line, = self.scale_ax.plot([0, self.total_distance], [0.5, 0.5],
+                                              color='black', linewidth=3)
+        self.scale_marker, = self.scale_ax.plot([0, 0], [0, 1], color='red',
+                                                linewidth=2, linestyle='--')
+
         self.scale_ax.set_xticks(tick_positions)
         self.scale_ax.set_xticklabels(tick_labels, rotation=30, ha='right')
         self.scale_ax.set_xlim(0, self.total_distance)
         self.scale_ax.set_ylim(0, 1.2)
-        
-        # Remove y-axis ticks and labels
         self.scale_ax.set_yticks([])
-        self.scale_ax.set_yticklabels([])
-        
-        # Set labels
         self.scale_ax.set_xlabel('Chainage (KM+Interval)', labelpad=10, fontweight='bold')
-        
-        # Add grid for better readability
+        self.scale_ax.set_title('Chainage Scale', fontweight='bold', pad=3)
         self.scale_ax.grid(True, axis='x', linestyle='--', alpha=0.3)
         self.scale_ax.spines['top'].set_visible(False)
         self.scale_ax.spines['right'].set_visible(False)
         self.scale_ax.spines['left'].set_visible(False)
-        
-        # Add a title for the scale
-        self.scale_ax.set_title('Chainage Scale', fontweight='bold', pad=3)
-        
-        # Redraw scale canvas
-        self.scale_canvas.draw()
-        
-        # Show the scale section
-        self.scale_section.setVisible(True)
 
+        self.scale_section.setVisible(True)
+        self.scale_canvas.draw()
     # =======================================================================================================================================
     # EDIT ZERO LINE
     def edit_zero_line(self):
@@ -3375,73 +3288,125 @@ class PointCloudViewer(ApplicationUI):
         if self.drawing_zero_line:
             interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
             pos = interactor.GetEventPosition()
-            # First try using cell picker which can pick between points
+            # Pick point accurately
             cell_picker = vtk.vtkCellPicker()
-            cell_picker.SetTolerance(0.0005) # Small tolerance for accurate picking
+            cell_picker.SetTolerance(0.0005)
             cell_picker.Pick(pos[0], pos[1], 0, self.renderer)
             clicked_point = None
             if cell_picker.GetCellId() != -1:
-                # Get the picked position in world coordinates
                 clicked_point = np.array(cell_picker.GetPickPosition())
-  
-                # Find the nearest actual point in the point cloud to our picked position
                 points = np.asarray(self.point_cloud.points)
                 if len(points) > 0:
                     distances = np.sum((points - clicked_point)**2, axis=1)
                     nearest_idx = np.argmin(distances)
                     clicked_point = points[nearest_idx]
-            # If still no point found, use the neighborhood search
             if clicked_point is None:
                 clicked_point = self.find_nearest_point_in_neighborhood(pos)
             if clicked_point is None:
-                return # No point found
+                return
             self.zero_points.append(clicked_point)
             label = "Start" if len(self.zero_points) == 1 else "End"
             actor = self.add_sphere_marker(clicked_point, label, color="purple")
             self.temp_zero_actors.append(actor)
+            # When both points are picked
             if len(self.zero_points) == 2:
                 self.drawing_zero_line = False
-                dialog = ZeroLineDialog(self.zero_points[0], self.zero_points[1], parent=self)
+                # Open dialog with current picked points
+                dialog = ZeroLineDialog(
+                    point1=self.zero_points[0],
+                    point2=self.zero_points[1],
+                    km1=None,
+                    chain1=None,
+                    km2=None,
+                    chain2=None,
+                    interval=20.0,
+                    parent=self
+                )
                 if dialog.exec_() == QDialog.Accepted:
                     try:
+                        # Get updated coordinates from dialog (user can edit them)
                         p1, p2 = dialog.get_points()
-                        if p1 is not None and p2 is not None:
-                            self.zero_start_point = p1
-                            self.zero_end_point = p2
-                        self.zero_start_km = int(dialog.km1_edit.text() or 0)
-                        self.zero_start_chain = float(dialog.chain1_edit.text() or 0)
-                        self.zero_end_km = int(dialog.km2_edit.text() or 0)
-                        self.zero_end_chain = float(dialog.chain2_edit.text() or 0)
-                        self.zero_interval = int(dialog.interval_edit.text() or 20)
-                        self.zero_physical_dist = np.linalg.norm(self.zero_end_point - self.zero_start_point)
-                        self.total_distance = self.zero_physical_dist
-                        self.zero_start_z = self.zero_start_point[2] # Set reference zero elevation
+                        if p1 is None or p2 is None:
+                            raise ValueError("Invalid or empty coordinates for one or both points.")
+
+                        # Update zero line points and state
+                        self.zero_start_point = np.array(p1, dtype=float)
+                        self.zero_end_point = np.array(p2, dtype=float)
+                        self.zero_start_z = float(p1[2])  # Reference elevation from Point 1 Z
+
+                        # Read KM values (optional, can be empty → None)
+                        km1_text = dialog.km1_edit.text().strip()
+                        km2_text = dialog.km2_edit.text().strip()
+                        self.zero_start_km = int(km1_text) if km1_text else None
+                        self.zero_end_km = int(km2_text) if km2_text else None
+
+                        # Read interval (default 20.0 if empty)
+                        # interval_text = dialog.interval_edit.text().strip()
+                        # self.zero_interval = float(interval_text) if interval_text else 20.0
+                        # #self.zero_interval = int(dialog.interval_edit.text().strip() or "20")
+
+
+                        # === Read and validate Interval (must be positive integer) ===
+                        interval_text = dialog.interval_edit.text().strip()
+                        try:
+                            interval_val = int(interval_text)
+                            if interval_val <= 0:
+                                raise ValueError("Interval must be greater than 0")
+                            self.zero_interval = interval_val
+                        except (ValueError, TypeError):
+                            self.zero_interval = 20  # Safe default
+                            self.message_text.append("Warning: Invalid interval entered. Using default 20m.")
+                        
+                        # Calculate total distance
+                        self.total_distance = np.linalg.norm(self.zero_end_point - self.zero_start_point)
+                        self.original_total_distance = self.total_distance
                         self.zero_line_set = True
+
+                        # Update 3D actors (keep the temporary spheres as final markers)
                         self.zero_start_actor = self.temp_zero_actors[0]
                         self.zero_end_actor = self.temp_zero_actors[1]
-                        self.zero_line_actor = self.add_line_between_points(self.zero_start_point, self.zero_end_point, "purple", show_label=False)
+                        self.zero_line_actor = self.add_line_between_points(
+                            self.zero_start_point, self.zero_end_point, "purple", show_label=False
+                        )
+
+                        # Update 2D graph
                         self.ax.set_xlim(0, self.total_distance)
-                        self.zero_graph_line, = self.ax.plot([0, self.total_distance], [0, 0], color='purple', linewidth=3)
+                        if hasattr(self, 'zero_graph_line') and self.zero_graph_line:
+                            self.zero_graph_line.remove()
+                        self.zero_graph_line, = self.ax.plot([0, self.total_distance], [0, 0],
+                                                            color='purple', linewidth=3)
+
+                        # Update ticks and scale
                         self.update_chainage_ticks()
-                        
-                        # SHOW THE SCALE SECTION
-                        self.scale_section.setVisible(True)
-                        
-                        # Update scale section with chainage
                         self.update_scale_ticks()
-                        
+                        if hasattr(self, 'scale_section'):
+                            self.scale_section.setVisible(True)
+
+                        # Redraw
                         self.canvas.draw()
                         self.figure.tight_layout()
-                        self.message_text.append("Zero line saved and graph updated.")
-                        self.message_text.append(f"Scale section activated with chainage: KM {self.zero_start_km}, Interval: {self.zero_interval}m")
-                        
-                    except ValueError:
-                        QMessageBox.warning(self, "Invalid Input", "Please enter valid numbers.")
+
+                        # === SAVE ZERO LINE CONFIG TO JSON IN CURRENT DESIGN LAYER ===
+                        self.save_zero_line_config_to_current_layer()
+
+                        # Success messages
+                        self.message_text.append("✓ Zero Line configured and saved successfully!")
+                        self.message_text.append(f"   Length: {self.total_distance:.2f} m")
+                        self.message_text.append(f"   Interval: {self.zero_interval:.1f} m")
+                        if self.zero_start_km is not None:
+                            self.message_text.append(f"   Start KM: {self.zero_start_km}+000")
+
+                    except ValueError as e:
+                        QMessageBox.warning(self, "Invalid Input", f"{str(e)}")
                         self.reset_zero_drawing()
                 else:
+                    # Dialog cancelled
                     self.reset_zero_drawing()
+                    self.message_text.append("Zero line configuration cancelled.")
+
             self.vtk_widget.GetRenderWindow().Render()
-            return
+            return  # Important: return early if we were drawing zero line
+#-------------------------------------
         if not self.measurement_active or not self.current_measurement or self.freeze_view or not self.plotting_active:
             return
         interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
@@ -5054,3 +5019,150 @@ class PointCloudViewer(ApplicationUI):
         else:
             QMessageBox.information(self, "Nothing to Save", "No checked baselines with drawn lines found to save.")
             self.message_text.append("No baselines saved (none checked or drawn).")
+
+
+# ==============================================================================================================================================
+    def open_zero_line_dialog(self, auto_opened=False):
+            """Open Zero Line Configuration Dialog — called manually or automatically"""
+            # Pass current values if already set
+            p1 = self.zero_start_point if self.zero_line_set else None
+            p2 = self.zero_end_point if self.zero_line_set else None
+
+            km1 = getattr(self, 'zero_start_km', None)
+            km2 = getattr(self, 'zero_end_km', None)
+            interval = getattr(self, 'zero_interval', 20.0)
+
+            dialog = ZeroLineDialog(
+                point1=p1, point2=p2,
+                km1=km1, km2=km2,
+                interval=interval,
+                parent=self
+            )
+
+            if dialog.exec_() == QDialog.Accepted:
+                p1, p2 = dialog.get_points()
+                if p1 is None or p2 is None:
+                    QMessageBox.warning(self, "Invalid Input", "Please enter valid numeric coordinates.")
+                    if auto_opened:
+                        self.zero_line.setChecked(False)
+                    return
+
+                try:
+                    km1_text = dialog.km1_edit.text().strip()
+                    km2_text = dialog.km2_edit.text().strip()
+                    interval_text = dialog.interval_edit.text().strip()
+
+                    self.zero_start_km = int(km1_text) if km1_text else None
+                    self.zero_end_km = int(km2_text) if km2_text else None
+                    self.zero_interval = float(interval_text) if interval_text else 20.0
+                except ValueError:
+                    QMessageBox.warning(self, "Invalid Input", "KM must be integer, interval must be a number.")
+                    if auto_opened:
+                        self.zero_line.setChecked(False)
+                    return
+
+                # Update zero line state
+                self.zero_start_point = p1
+                self.zero_end_point = p2
+                self.zero_start_z = p1[2]  # Reference elevation from Point 1 Z
+                self.zero_line_set = True
+
+                dir_vec = p2 - p1
+                self.total_distance = np.linalg.norm(dir_vec)
+                self.original_total_distance = self.total_distance
+
+                # Update graph axis and ticks
+                self.update_chainage_ticks()
+                if hasattr(self, 'scale_section'):
+                    self.scale_section.setVisible(True)
+
+                # Redraw zero line on 2D graph
+                if hasattr(self, 'zero_graph_line') and self.zero_graph_line:
+                    self.zero_graph_line.remove()
+                self.zero_graph_line, = self.ax.plot([0, self.total_distance], [0, 0],
+                                                    color='purple', linewidth=3, label='Zero Line')
+                self.canvas.draw()
+
+                # Refresh 3D view
+                if hasattr(self, 'vtk_widget'):
+                    self.vtk_widget.GetRenderWindow().Render()
+
+                # === CRITICAL: Save zero line config to current design layer ===
+                success = self.save_zero_line_config_to_current_layer()
+                if success:
+                    self.message_text.append("Zero line successfully configured and saved to current layer!")
+
+                # User feedback
+                feedback = [
+                    "Zero Line Set Successfully!",
+                    f"   • Length: {self.total_distance:.2f} m",
+                    f"   • Interval: {self.zero_interval:.1f} m",
+                ]
+                if self.zero_start_km is not None:
+                    feedback.append(f"   • Start KM: {self.zero_start_km}+000")
+                if self.zero_end_km is not None:
+                    feedback.append(f"   • End KM: {self.zero_end_km}+{int(self.total_distance):03d}")
+                for line in feedback:
+                    self.message_text.append(line)
+
+            else:
+                # Dialog canceled
+                if auto_opened and not self.zero_line_set:
+                    self.zero_line.setChecked(False)
+                self.message_text.append("Zero line configuration canceled.")
+
+# ========================================================================================================================================================
+    def get_current_design_layer_path(self):
+        """Return path to current active design layer, fallback to worksheet root"""
+        if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
+            self.message_text.append("No active worksheet — cannot save zero line config.")
+            return None
+        worksheet_path = os.path.join(self.WORKSHEETS_BASE_DIR, self.current_worksheet_name)
+        if hasattr(self, 'current_layer_name') and self.current_layer_name:
+            layer_path = os.path.join(worksheet_path, "designs", self.current_layer_name)
+            if os.path.exists(layer_path):
+                return layer_path
+            else:
+                self.message_text.append(f"Design layer folder not found: {layer_path}")
+                self.message_text.append("Saving zero_line_config.json in worksheet root.")
+        return worksheet_path
+
+# =========================================================================================================================================================
+    def save_zero_line_config_to_current_layer(self):
+        """Save zero line configuration as JSON in current design layer or worksheet root"""
+        save_path = self.get_current_design_layer_path()
+        if not save_path:
+            return False
+
+        zero_config = {
+            "zero_line_set": True,
+            "point1": {
+                "coordinates": self.zero_start_point.tolist(),
+                "km": self.zero_start_km if (hasattr(self, 'zero_start_km') and self.zero_start_km is not None) else None,
+                "chainage_m": 0.0
+            },
+            "point2": {
+                "coordinates": self.zero_end_point.tolist(),
+                "km": self.zero_end_km if (hasattr(self, 'zero_end_km') and self.zero_end_km is not None) else None,
+                "chainage_m": float(self.total_distance)
+            },
+            "total_length_m": float(self.total_distance),
+            "interval_m": float(self.zero_interval),
+            "reference_elevation_z": float(self.zero_start_z),
+            "saved_at": datetime.now().isoformat(),
+            "saved_by": getattr(self, 'current_user', 'unknown')
+        }
+
+        json_path = os.path.join(save_path, "zero_line_config.json")
+        try:
+            os.makedirs(save_path, exist_ok=True)
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(zero_config, f, indent=4, ensure_ascii=False)
+            self.message_text.append("Zero line configuration saved to:")
+            self.message_text.append(f"   {json_path}")
+            return True
+        except Exception as e:
+            error_msg = f"Failed to save zero_line_config.json: {str(e)}"
+            self.message_text.append(error_msg)
+            QMessageBox.critical(self, "Save Failed", error_msg)
+            return False
