@@ -19,6 +19,9 @@ from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtkmodules.vtkRenderingCore import (vtkRenderer)
 from vtkmodules.vtkCommonColor import vtkNamedColors
 
+# =====================================================================================================================================
+#                                               ***  CLASS - Appilcation UI Constructor ***
+# =====================================================================================================================================
 class ApplicationUI(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -67,19 +70,22 @@ class ApplicationUI(QMainWindow):
         self.current_artist = None
         self.cid_click = None
         self.cid_key = None
+
+# --------------------------------------------------------------------------------------------------------------------------------
         self.PENCIL_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
         viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
         stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 20h9"/> <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
         </svg>"""
 
+# --------------------------------------------------------------------------------------------------------------------------------
         self.svg_left = b"""<svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M15 18L9 12L15 6" stroke="white" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>"""
         self.svg_right = b"""<svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M9 6L15 12L9 18" stroke="white" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>"""
-        # ------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------
         # Initialization for the saving the line actor, points actor
         self.measurement_actors = []
         self.measurement_points = []
@@ -138,9 +144,6 @@ class ApplicationUI(QMainWindow):
         self.three_D_frame = None   # Will hold the 3D Layers frame
         self.two_D_frame = None     # Will hold the 2D Layers frame
 
-# ---------------------------------------------------------------------------------------------------------------------------
-        #self.WORKSHEET_FILE = "worksheet.txt"
-
         self.current_worksheet_name = None
         self.current_project_name = None
 
@@ -174,7 +177,7 @@ class ApplicationUI(QMainWindow):
         worksheet_info_layout.addWidget(self.worksheet_info_label)
         self.worksheet_display.setVisible(False)
 
-# ----------------------------------------------------------------------------------------------------------------------------- 
+
         self.initUI()
         self.create_progress_bar()
 
@@ -225,6 +228,21 @@ class ApplicationUI(QMainWindow):
 
         self.construction_dot_artists = [] 
 
+        self.material_items = []
+
+        # Create a layout for material items if it doesn't exist
+        if not hasattr(self, 'material_items_layout'):
+            self.material_items_layout = QVBoxLayout()
+            self.material_items_layout.setContentsMargins(0, 0, 0, 0)
+            self.material_items_layout.setSpacing(5)
+            
+            # Create a widget to hold the material items
+            material_items_widget = QWidget()
+            material_items_widget.setLayout(self.material_items_layout)
+
+# ========================================================================================================================================================
+#                                                           *** Application UI Function ***
+# =========================================================================================================================================================
     def initUI(self):
         self.setWindowTitle('Point Cloud Viewer')
         self.setGeometry(100, 100, 1200, 800)
@@ -1254,45 +1272,29 @@ class ApplicationUI(QMainWindow):
 
         line_layout.addWidget(self.deck_line_container)
 
-        # ==================== MATERIAL LINE (NEW) ====================
-        self.material_line_container, self.material_line, material_label, self.material_pencil = create_line_checkbox_with_pencil(
-            "Material Line",
-            "Shows the material reference line with thickness",
-            'material_line'
-        )
-        self.material_line.setStyleSheet("""
-            QCheckBox {
-                color: black;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QCheckBox:checked {
-                color: orange;
-            }
-        """)
-        self.material_line_container.setVisible(False)  # Hidden until New is clicked
-        # self.material_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'material'))
-        #self.material_pencil.clicked.connect(self.edit_material_line)
-        line_layout.addWidget(self.material_line_container)
+# ================================================================================================================================== 
 
-        # Additional buttons - NOW INCLUDING "Add Material Line" at top
+        # Additional buttons - "Add Material Line" (now always visible)
         self.add_material_line_button = QPushButton("Add Material Line")
         self.add_material_line_button.setStyleSheet("""
             QPushButton {
-                background-color: #FF9800;
+                background-color: #28a745;  /* Green */
                 color: white;
                 border: none;
                 padding: 10px;
                 border-radius: 5px;
                 font-weight: bold;
-                font-size: 14px;
             }
-            QPushButton:hover { background-color: #F57C00; }
-            QPushButton:pressed { background-color: #EF6C00; }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+            QPushButton:pressed {
+                background-color: #1e7e34;
+            }
         """)
-        self.add_material_line_button.setVisible(False)  # Hidden initially
-        self.add_material_line_button.clicked.connect(self.open_material_line_dialog)
-        
+        # Button is now always visible from the start
+        self.add_material_line_button.setVisible(True)
+
         line_layout.addWidget(self.add_material_line_button)
 
         # Create a dedicated layout for material items (to control order)
@@ -1304,10 +1306,11 @@ class ApplicationUI(QMainWindow):
         # Add this layout right after the button
         line_layout.addLayout(self.material_items_layout)
 
-        # Optional: store the index where items start (for safety)
-        self.material_items_start_index = line_layout.count() - 1  # points to the layout itself
-            
         line_layout.addStretch(1)
+
+        # Storage for material configurations and UI items
+        self.material_configs = []   # list of dicts with material data
+        self.material_items = []     # list of UI item dicts
 
         # Additional buttons
         self.preview_button = QPushButton("Curve")

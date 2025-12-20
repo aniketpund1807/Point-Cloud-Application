@@ -6,13 +6,13 @@ import time
 import json
 
 from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QWidget, QPushButton, QFileDialog, QMessageBox, QDialog
+    QVBoxLayout, QHBoxLayout, QLabel, QWidget, QPushButton, QFileDialog, QMessageBox, QDialog, QApplication,
+    QCheckBox
 )
 from PyQt5.QtCore import Qt, QByteArray, QSize, QRectF, QTimer, QEvent
 from PyQt5.QtGui import QPixmap, QPainter, QIcon
 from PyQt5.QtSvg import QSvgRenderer
 
-# VTK imports
 import vtk
 from vtkmodules.vtkFiltersSources import vtkSphereSource, vtkLineSource
 from vtkmodules.vtkRenderingCore import vtkActor, vtkPolyDataMapper
@@ -56,8 +56,6 @@ class PointCloudViewer(ApplicationUI):
         self.road_plane_actors = []      # Stores the two side planes (left + right)
         self.road_plane_center_actor = None   # Optional: centre line for reference
 
-
-        # NEW: Slider position marker on 3D view
         self.slider_marker_actor = None   # The sphere actor that follows the slider
         self.slider_marker_radius = 0.45  # Size of the marker sphere (adjust if needed)
 
@@ -71,6 +69,8 @@ class PointCloudViewer(ApplicationUI):
         self.zero_interval = None  # Will be set when zero line is defined
 
         self.bottom_button_layout = None   # Add for the baseline name show in bottom section
+
+        self.material_line_widgets = []
 
         # NEW: Unified plane support for ALL baselines
         self.baseline_plane_actors = []     # Stores all plane actors (individual + combined)
@@ -113,11 +113,13 @@ class PointCloudViewer(ApplicationUI):
         # Add this method call to set up the label click handler
         QTimer.singleShot(100, self.setup_label_click_handler)  # Small delay to ensure canvas is ready
 
+# ===================================================================================================================================
     def setup_label_click_handler(self):
         """Set up the label click event handler after canvas is fully initialized"""
         if self.canvas:
             self.label_pick_id = self.canvas.mpl_connect('pick_event', self.on_label_click)  
 
+# ===================================================================================================================================
     def on_label_click(self, event):
         """Handle click on construction dot labels"""
         artist = event.artist
@@ -181,7 +183,7 @@ class PointCloudViewer(ApplicationUI):
                 # Redraw the canvas
                 self.canvas.draw_idle()
 
-    # =====================================================================================================================================
+# =====================================================================================================================================
     def scroll_graph_with_slider(self, value):
         """Scroll the graph canvas based on slider position"""
         if not hasattr(self, 'graph_horizontal_scrollbar') or not self.graph_horizontal_scrollbar:
@@ -202,7 +204,7 @@ class PointCloudViewer(ApplicationUI):
             # Update the visual marker on the main graph
             self.update_main_graph_marker(value)
         
-    # =======================================================================================================================================
+# =======================================================================================================================================
     # HOVER HANDLER FOR POINTS
     def on_hover(self, event):
         if event.inaxes != self.ax:
@@ -242,14 +244,14 @@ class PointCloudViewer(ApplicationUI):
             self.annotation.set_visible(False)
             self.canvas.draw_idle()
     
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def set_measurement_type(self, mtype):
         """Helper to switch measurement type"""
         self.current_measurement = mtype
         self.measurement_points = []
         self.message_text.append(f"Switched to {mtype.replace('_', ' ').title()}")
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def reset_measurement_tools(self):
         """Clear all measurement buttons and states"""
         self.line_button.setVisible(False)
@@ -259,8 +261,8 @@ class PointCloudViewer(ApplicationUI):
         self.presized_button.setVisible(False)
         self.metrics_group.setVisible(False)
 
-    # =======================================================================================================================================
-    # Close dropdown when clicking outside
+# =======================================================================================================================================
+# Close dropdown when clicking outside
     def eventFilter(self, obj, event):
         if event.type() == event.MouseButtonPress:
             if obj.isWidgetType() and obj.windowFlags() & Qt.Popup:
@@ -272,14 +274,14 @@ class PointCloudViewer(ApplicationUI):
                         btn.property("dropdown").hide()
         return super().eventFilter(obj, event)
     
-    # =======================================================================================================================================
-    # Helper called when user picks New / Existing (optional)
+# =======================================================================================================================================
+# Helper called when user picks New / Existing (optional)
     def on_dropdown_choice(self, main_btn, choice):
         main_btn.setChecked(False)
         main_btn.property("dropdown").hide()
         #print(f"{main_btn.text()} → {choice} selected")   # replace with real logic
 
-    # =======================================================================================================================================   
+# =======================================================================================================================================   
     def load_last_worksheet(self):
         """Load and display the most recently created worksheet on startup"""
         if not os.path.exists(self.WORKSHEET_FILE):
@@ -295,14 +297,14 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             print(f"Failed to load last worksheet: {e}")
 
-    # =======================================================================================================================================
-    # TOGGLE MESSAGE SECTION
+# =======================================================================================================================================
+# TOGGLE MESSAGE SECTION
     def toggle_message_section(self):
         self.message_visible = not self.message_visible
         self.message_section.setVisible(self.message_visible)
         self.message_button.setText("Hide Message" if self.message_visible else "Message")
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def toggle_worksheet_options(self):
         checked = self.worksheet_button.isChecked()
         self.sub_buttons_widget.setVisible(checked)
@@ -310,7 +312,7 @@ class PointCloudViewer(ApplicationUI):
         # Optional: change icon/text to indicate open/close state
         self.worksheet_button.setText("📊Worksheet ▼" if checked else "📊Worksheet")
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def toggle_design_options(self):
         checked = self.design_button.isChecked()
         self.sub_design_buttons_widget.setVisible(checked)
@@ -318,7 +320,7 @@ class PointCloudViewer(ApplicationUI):
         # Optional: change icon/text to indicate open/close state
         self.design_button.setText("📐Design ▼" if checked else "📐Design")
 
-    # =======================================================================================================================================   
+# =======================================================================================================================================   
     def toggle_construction_options(self):
         checked = self.construction_button.isChecked()
         self.sub_construction_buttons_widget.setVisible(checked)
@@ -326,7 +328,7 @@ class PointCloudViewer(ApplicationUI):
         # Optional: change icon/text to indicate open/close state
         self.construction_button.setText("🏗 Construction ▼" if checked else "🏗 Construction")
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def toggle_measurement_options(self):
         checked = self.measurement_button.isChecked()
         self.sub_measurement_buttons_widget.setVisible(checked)
@@ -334,8 +336,7 @@ class PointCloudViewer(ApplicationUI):
         # Optional: change icon/text to indicate open/close state
         self.measurement_button.setText("📏Measurement ▼" if checked else "📏Measurement")
 
-    # =======================================================================================================================================
-
+# =======================================================================================================================================
     def open_create_project_dialog(self):
         dialog = CreateProjectDialog(self)
         if dialog.exec_() == QDialog.Accepted:
@@ -404,8 +405,7 @@ class PointCloudViewer(ApplicationUI):
                 QMessageBox.critical(self, "Error", f"Failed to save project configuration:\n{str(e)}")
                 self.message_text.append(f"Error saving project '{project_name}': {str(e)}")
 
-    # =======================================================================================================================================
-
+# =======================================================================================================================================
     def open_new_worksheet_dialog(self):
         """Open dialog to create a new worksheet with Road/Bridge baseline selection and dynamic UI updates.
         Creates 'designs' or 'measurements' subfolder based on 2D/3D selection, then adds the initial layer folder."""
@@ -438,7 +438,6 @@ class PointCloudViewer(ApplicationUI):
                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.No:
                 return
-            # Continue to overwrite (we'll recreate subfolders)
 
         # === NEW LOGIC: Create 'designs' or 'measurements' based on dimension ===
         if dimension == "2D":
@@ -607,8 +606,7 @@ class PointCloudViewer(ApplicationUI):
                                 f"Point Cloud: {pc_display}\n\n"
                                 f"Saved in:\n{worksheet_folder}")
 
-    # =======================================================================================================================================
-
+# =======================================================================================================================================
     def display_current_worksheet(self, config_data):
         """
         Updates the Current Worksheet box and the top mode banner (Measurement/Design)
@@ -701,8 +699,8 @@ class PointCloudViewer(ApplicationUI):
             # """)
 
 
-    # =======================================================================================================================================
-    # # OPEN CREATE NEW DESIGN LAYER DIALOG
+# =======================================================================================================================================
+# # OPEN CREATE NEW DESIGN LAYER DIALOG
     def open_create_new_design_layer_dialog(self):
         """Open the Design New Layer dialog and save config to current worksheet's designs folder"""
         if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
@@ -804,7 +802,7 @@ class PointCloudViewer(ApplicationUI):
 
             self.canvas.draw()
             self.vtk_widget.GetRenderWindow().Render()
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def open_measurement_dialog(self):
         """Open the Measurement Configuration Dialog when New is clicked"""
         dialog = MeasurementDialog(self)
@@ -851,7 +849,7 @@ class PointCloudViewer(ApplicationUI):
             if config["presized_enabled"]:
                 self.presized_button.clicked.connect(self.handle_presized_button)
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def open_construction_new_dialog(self):
         """Handle 'Construction → New' – full workflow: validation, folder creation, config save, UI switch"""
         # 1. Must have an active worksheet
@@ -975,6 +973,16 @@ class PointCloudViewer(ApplicationUI):
             self.add_layer_to_panel(layer_name, "2D")
             self.two_D_frame.setVisible(True)
 
+            if hasattr(self, 'mode_banner'):
+                self.mode_banner.setText("CONSTRUCTION MODE")
+                self.mode_banner.setStyleSheet("""
+                    QLabel {
+
+                        font-weight: bold;
+                    }
+                """)
+                self.mode_banner.setVisible(True)
+
             # 10. Feedback
             self.message_text.append(f"Construction layer '{layer_name}' ({construction_type}) created successfully!")
             self.message_text.append(f"   → Folder: {layer_folder}")
@@ -1000,7 +1008,7 @@ class PointCloudViewer(ApplicationUI):
             )
             self.message_text.append(f"Error creating construction layer: {str(e)}")
 
-# ======================================================================================================
+# ===================================================================================================================================
     def switch_to_construction_mode(self):
         """Update bottom section for Construction mode: hide baselines, show only Save button"""
         # Hide ALL baseline-related containers
@@ -1041,23 +1049,41 @@ class PointCloudViewer(ApplicationUI):
 
         self.canvas.draw_idle()
 
-
-    # =======================================================================================================================================
-    # OPEN MATERIAL LINE DIALOG WHEN "Construction → New" IS CLICKED
+# =======================================================================================================================================
+# OPEN MATERIAL LINE DIALOG WHEN "Construction → New" IS CLICKED
     def open_material_line_dialog(self):
-        """Opens the Material Line Configuration Dialog"""
+        """Opens the Material Line Configuration Dialog to add a new line"""
         dialog = MaterialLineDialog(parent=self)
         if dialog.exec_() == QDialog.Accepted:
             config = dialog.get_material_data()
             
-            # Show the Material Line checkbox
-            self.material_line_container.setVisible(True)
-            self.material_line.setChecked(True)
+            # Add visibility flag
+            config['visible'] = True
             
-            # Optional: store config for later use
-            if not hasattr(self, 'material_configs'):
-                self.material_configs = []
+            # Store config
             self.material_configs.append(config)
+            
+            # Create UI entry for the material line
+            self.create_material_line_entry(config)
+            
+            # If this is the first material line, change button color to orange
+            if len(self.material_configs) == 1:
+                self.add_material_line_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #FFA500;
+                        color: white;
+                        border: none;
+                        padding: 10px;
+                        border-radius: 5px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background-color: #FF8C00;
+                    }
+                    QPushButton:pressed {
+                        background-color: #FF7F00;
+                    }
+                """)
             
             self.message_text.append("Material Line Created Successfully!")
             self.message_text.append(f"Name: {config['name']}")
@@ -1066,8 +1092,8 @@ class PointCloudViewer(ApplicationUI):
         else:
             self.message_text.append("Material Line creation cancelled.")
 
-    # =======================================================================================================================================    
-    # Optional: allow editing later with pencil button
+# =======================================================================================================================================    
+# Optional: allow editing later with pencil button
     def edit_material_line(self):
         if not hasattr(self, 'material_configs') or not self.material_configs:
             QMessageBox.information(self, "No Data", "No material line has been created yet.")
@@ -1077,337 +1103,564 @@ class PointCloudViewer(ApplicationUI):
             self.material_configs[-1] = dialog.get_material_data()
             self.message_text.append("Material Line configuration updated.")
 
-    # =======================================================================================================================================
-    def show_material_section(self):
-        """Show material line configuration section"""
-        # Hide all existing containers in line layout
-        self.road_surface_container.setVisible(False)
-        self.surface_container.setVisible(False)
-        self.zero_container.setVisible(False)
-        self.construction_container.setVisible(False)
-        self.deck_line_container.setVisible(False)
-        self.projection_container.setVisible(False)
-        if hasattr(self, 'bridge_zero_container'):
-            self.bridge_zero_container.setVisible(False)
-        if hasattr(self, 'construction_dots_container'):
-            self.construction_dots_container.setVisible(False)
-        
-        # Show only material-related items
-        self.preview_button.setVisible(False)
-        self.threed_map_button.setVisible(False)
-        self.save_button.setVisible(True)
-        
-        # Initialize material items list and layout if not exists
-        if not hasattr(self, 'material_items'):
-            self.material_items = []
-        
-        if not hasattr(self, 'material_items_layout'):
-            self.material_items_layout = QVBoxLayout()
-            self.material_items_layout.setContentsMargins(0, 10, 0, 10)
-            self.material_items_layout.setSpacing(8)
-            
-            # Insert after preview button
-            line_layout = self.preview_button.parentWidget().layout()
-            preview_index = line_layout.indexOf(self.preview_button)
-            line_layout.insertLayout(preview_index + 1, self.material_items_layout)
-        
-        # Clear any old widgets except the Add button (in case of re-showing)
-        while self.material_items_layout.count() > len(self.material_items) + 1:  # +1 for Add button
-            item = self.material_items_layout.takeAt(self.material_items_layout.count() - 1)
-            if item.widget():
-                item.widget().deleteLater()
-        
-        # Always ensure "Add Material Line" button exists and is at the TOP
-        if not hasattr(self, 'add_material_button') or not self.add_material_button.parent():
-            self.add_material_button = QPushButton("Add Material Line")
-            self.add_material_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #4CAF50;
-                    color: white;
-                    border: none;
-                    padding: 12px;
-                    border-radius: 6px;
-                    font-size: 15px;
-                    font-weight: bold;
-                }
-                QPushButton:hover { background-color: #45a049; }
-                QPushButton:pressed { background-color: #388e3c; }
-            """)
-            self.add_material_button.clicked.connect(self.add_material_line_dialog)
-            self.material_items_layout.insertWidget(0, self.add_material_button)  # Always at top
-        
-        # Re-add all existing material entries (in case section was hidden/shown)
-        for item in self.material_items:
-            self.material_items_layout.addWidget(item['container'])
-        
-        # Save button styling
-        self.save_button.setText("Save Material Lines")
-        self.save_button.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9800;
-                color: white;
-                border: none;
-                padding: 12px;
-                border-radius: 6px;
-                font-weight: bold;
-                font-size: 15px;
-            }
-            QPushButton:hover { background-color: #F57C00; }
-            QPushButton:pressed { background-color: #EF6C00; }
-        """)
-        self.save_button.clicked.connect(self.save_material_data)
-        
-        self.current_mode = 'material'
-
-    # =======================================================================================================================================
-    def add_material_line_dialog(self):
-        """Open dialog to add a new material line"""
-        dialog = MaterialLineDialog(parent=self)
-        
-        if dialog.exec_() == QDialog.Accepted:
-            material_data = dialog.get_material_data()
-            
-            # Use the name user entered (fallback to generic if empty)
-            display_name = material_data['name']
-            # if not display_name:
-            #     display_name = f"Material Line {len(self.material_items) + 1}"
-            #     material_data['name'] = display_name
-            
-            # Create UI entry and add it below the button
-            self.create_material_line_entry(material_data)
-            
-            self.message_text.append(f"Added new material line: <b>{display_name}</b>")
-
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def create_material_line_entry(self, material_data, edit_index=None):
-        """Create a new material line entry in the UI - always added BELOW the Add button"""
-        # Create styled container
+        """Create or update a material line entry in the UI (below the Add button)"""
+        # Create container
         container = QWidget()
+        container.setFixedWidth(250)
         container.setStyleSheet("""
             QWidget {
-                background-color: rgba(255, 152, 0, 0.15);
-                border: 2px solid #FF9800;
-                border-radius: 10px;
-                padding: 8px;
-                margin: 4px 0;
+                background-color: #FFA500;  /* Orange background */
+                border: 1px solid #FF8C00;
+                border-radius: 5px;
+                margin: 3px;
+                padding: 5px;
             }
         """)
         
         layout = QHBoxLayout(container)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(15)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
         
-        # Material name label
+        # Checkbox for visibility/selection
+        checkbox = QCheckBox()
+        checkbox.setChecked(material_data.get('visible', True))
+        checkbox.setStyleSheet("""
+            QCheckBox {
+                background-color: transparent;
+                border: none;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+            }
+        """)
+        
+        # Connect checkbox to toggle visibility
+        checkbox.stateChanged.connect(lambda state, idx=len(self.material_items) if edit_index is None else edit_index: 
+                                    self.toggle_material_line_visibility(idx, state))
+        
+        # Material label
         material_label = QLabel(material_data['name'])
         material_label.setStyleSheet("""
             QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 2px;
                 font-weight: bold;
-                font-size: 16px;
-                color: #E65100;
+                font-size: 14px;
+                color: #000000;
             }
         """)
-        material_label.setCursor(Qt.PointingHandCursor)
         
-        # Pencil edit button
+        # Pencil button for editing
         pencil_button = QPushButton()
         svg_data = QByteArray()
         svg_data.append(self.PENCIL_SVG)
         renderer = QSvgRenderer(svg_data)
-        pixmap = QPixmap(28, 28)
+        pixmap = QPixmap(20, 20)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
         renderer.render(painter, QRectF(pixmap.rect()))
         painter.end()
         icon = QIcon(pixmap)
         pencil_button.setIcon(icon)
-        pencil_button.setIconSize(QSize(28, 28))
-        pencil_button.setFixedSize(40, 40)
+        pencil_button.setIconSize(QSize(20, 20))
+        pencil_button.setFixedSize(28, 28)
         pencil_button.setStyleSheet("""
             QPushButton {
-                background-color: #4CAF50;
+                background-color: #28a745;
                 border: none;
-                border-radius: 20px;
+                padding: 0px;
+                margin: 0px;
+                border-radius: 3px;
             }
-            QPushButton:hover { background-color: #45a049; }
-            QPushButton:pressed { background-color: #388e3c; }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+            QPushButton:pressed {
+                background-color: #1e7e34;
+            }
         """)
         pencil_button.setCursor(Qt.PointingHandCursor)
+        pencil_button.clicked.connect(lambda checked, idx=len(self.material_items) if edit_index is None else edit_index: 
+                                    self.edit_existing_material_line(idx))
         
-        # Connect edit action
-        pencil_button.clicked.connect(
-            lambda checked, data=material_data.copy(), cont=container, lbl=material_label, idx=len(self.material_items):
-            self.edit_material_line(data, cont, lbl, idx)
-        )
-        
-        layout.addWidget(material_label, stretch=1)
+        # Add widgets to layout
+        layout.addWidget(checkbox)
+        layout.addWidget(material_label, 1)
         layout.addWidget(pencil_button)
         
         if edit_index is not None:
-            # === EDIT EXISTING ===
-            old_item = self.material_items[edit_index]
-            old_container = old_item['container']
-            
-            # Remove old widget from layout
-            self.material_items_layout.removeWidget(old_container)
-            old_container.deleteLater()
-            
-            # Update list
-            self.material_items[edit_index] = {
+            # Replace existing item
+            if edit_index < len(self.material_items):
+                old_container = self.material_items[edit_index]['container']
+                old_container.setParent(None)
+                old_container.deleteLater()
+                
+                self.material_items[edit_index] = {
+                    'container': container,
+                    'checkbox': checkbox,
+                    'label': material_label,
+                    'pencil_button': pencil_button,
+                    'data': material_data
+                }
+                
+                # Re-insert at correct position
+                self.material_items_layout.insertWidget(edit_index, container)
+        else:
+            # Add new item
+            new_item = {
                 'container': container,
+                'checkbox': checkbox,
                 'label': material_label,
                 'pencil_button': pencil_button,
                 'data': material_data
             }
-            
-            # Insert back at correct position (after Add button + previous items)
-            insert_pos = edit_index + 1  # +1 because Add button is at index 0
-            self.material_items_layout.insertWidget(insert_pos, container)
-            
-            self.message_text.append(f"Updated material line: <b>{material_data['name']}</b>")
-        else:
-            # === ADD NEW ===
-            # Always append below existing entries (after Add button)
+            self.material_items.append(new_item)
             self.material_items_layout.addWidget(container)
-            
-            self.material_items.append({
-                'container': container,
-                'label': material_label,
-                'pencil_button': pencil_button,
-                'data': material_data
-            })
         
-        # Refresh canvas if needed
-        if hasattr(self, 'canvas'):
-            self.canvas.draw_idle()
-
-    # =======================================================================================================================================
-    def edit_material_line(self, material_data, container, label, index):
-        """Open dialog to edit existing material line"""
-        dialog = MaterialLineDialog(material_data=material_data, parent=self)
+        # Message for new items only
+        if edit_index is None:
+            self.message_text.append(f"Added material line: {material_data['name']}")
+# =======================================================================================================================================
+    def edit_existing_material_line(self, index):
+        """Edit an existing material line by index"""
+        if index < 0 or index >= len(self.material_items):
+            return
+        
+        item = self.material_items[index]
+        current_data = item['data']
+        
+        dialog = MaterialLineDialog(material_data=current_data, parent=self)
         
         if dialog.exec_() == QDialog.Accepted:
-            new_data = dialog.get_material_data()
+            new_material_data = dialog.get_material_data()
             
-            # Update name if changed
-            new_name = new_data['name'].strip() or f"Material Line {index + 1}"
-            new_data['name'] = new_name
+            # Preserve visibility
+            new_material_data['visible'] = current_data.get('visible', True)
             
-            # Recreate entry at same index
-            self.create_material_line_entry(new_data, edit_index=index)
+            # Update stored config as well
+            if index < len(self.material_configs):
+                self.material_configs[index] = new_material_data
+            
+            # Update UI
+            self.create_material_line_entry(new_material_data, edit_index=index)
+            
+            self.message_text.append(f"Updated material line: {new_material_data['name']}")
 
-    # =======================================================================================================================================
-    def hide_material_section(self):
-        """Hide material section when switching modes"""
-        if hasattr(self, 'material_items_layout'):
-            for i in range(self.material_items_layout.count()):
-                item = self.material_items_layout.itemAt(i)
-                if item and item.widget():
-                    item.widget().setVisible(False)
-        
-        if hasattr(self, 'save_button'):
-            self.save_button.setText("Save")
-            self.save_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #FF9800;
-                    color: white;
-                    border: none;
-                    padding: 10px;
-                    border-radius: 5px;
-                    font-weight: bold;
-                }
-                QPushButton:hover { background-color: #F57C00; }
-                QPushButton:pressed { background-color: #EF6C00; }
-            """)
-        
-        self.current_mode = None
+# ====================================================================================================================================
+    def toggle_material_line_visibility(self, index, state):
+        """Toggle visibility of a material line"""
+        if 0 <= index < len(self.material_items):
+            item = self.material_items[index]
+            is_visible = state == Qt.Checked
+            item['data']['visible'] = is_visible
+            if index < len(self.material_configs):
+                self.material_configs[index]['visible'] = is_visible
+            
+            if is_visible:
+                self.message_text.append(f"Showing material line: {item['data']['name']}")
+            else:
+                self.message_text.append(f"Hiding material line: {item['data']['name']}")
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def save_material_data(self):
         """Save all material lines"""
-        if self.current_mode == 'material' and hasattr(self, 'material_items') and self.material_items:
+        if hasattr(self, 'material_items') and self.material_items:
             self.message_text.append("<b>Material lines saved successfully!</b>")
             self.message_text.append(f"Total: {len(self.material_items)} material line(s)\n")
             for i, item in enumerate(self.material_items):
                 data = item['data']
-                self.message_text.append(f"<b>{i+1}. {data['name']}</b>")
+                visibility = "Visible" if data.get('visible', True) else "Hidden"
+                self.message_text.append(f"<b>{i+1}. {data['name']}</b> [{visibility}]")
                 self.message_text.append(f"   • Initial Thickness: {data['initial_filling']} mm")
                 self.message_text.append(f"   • Final Thickness: {data['final_compressed']} mm")
-                self.message_text.append(f"   • Reference: {data.get('ref_layer') or data.get('ref_line') or 'None'}")
+                ref = data.get('ref_layer') or data.get('ref_line') or 'None'
+                self.message_text.append(f"   • Reference: {ref}")
+                if data.get('description'):
+                    self.message_text.append(f"   • Description: {data['description']}")
                 self.message_text.append("")
         else:
             self.message_text.append("No material lines to save.")
 
-    # ===========================================================================================================================================================
-
+# ===========================================================================================================================================================
     def open_existing_worksheet(self):
         dialog = ExistingWorksheetDialog(self)
-        if dialog.exec_() == QDialog.Accepted:
-            data = dialog.get_selected_data()
-            if not data:
-                return
+        if dialog.exec_() != QDialog.Accepted:
+            return
 
-            # Load worksheet config
-            config = data["worksheet_data"]
-            self.current_worksheet_name = config.get("worksheet_name")
-            self.current_project_name = config.get("project_name")
-            self.current_worksheet_data = config
-            self.current_layer_name = data["layer_name"]
+        data = dialog.get_selected_data()
+        if not data:
+            QMessageBox.warning(self, "Invalid Selection", "No valid worksheet/layer selected.")
+            return
 
-            # Update UI
-            self.display_current_worksheet(config)
+        # Extract data
+        config = data["worksheet_data"]
+        worksheet_name = config.get("worksheet_name")
+        layer_name = data["layer_name"]
+        subfolder_type = data["subfolder_type"]  # "designs", "measurements", "construction"
+        full_layer_path = data["full_layer_path"]
 
-            dimension = config.get("dimension", "2D")
-            category = config.get("worksheet_category", "None")
+        if not os.path.exists(full_layer_path):
+            QMessageBox.critical(self, "Path Error", f"Layer folder not found:\n{full_layer_path}")
+            return
 
-            # Show correct panels
-            if dimension == "3D":
-                self.three_D_frame.setVisible(True)
-                self.two_D_frame.setVisible(False)
-            else:
-                self.three_D_frame.setVisible(False)
-                self.two_D_frame.setVisible(True)
+        # Update application state
+        self.current_worksheet_name = worksheet_name
+        self.current_project_name = config.get("project_name")
+        self.current_worksheet_data = config
+        self.current_layer_name = layer_name
 
-            # Show bottom section only for Road/Bridge design layers
-            self.bottom_section.setVisible(category in ["Road", "Bridge"])
+        # Update UI display (top banner)
+        self.display_current_worksheet(config)
 
-            # Show correct baseline controls
-            self.surface_container.setVisible(False)
-            self.construction_container.setVisible(False)
-            self.road_surface_container.setVisible(False)
-            self.zero_container.setVisible(False)
-            self.deck_line_container.setVisible(False)
-            self.projection_container.setVisible(False)
-            self.construction_dots_container.setVisible(False)
+        dimension = config.get("dimension", "2D")
+        category = config.get("worksheet_category", "None")
 
-            if category == "Road":
-                self.surface_container.setVisible(True)
-                self.construction_container.setVisible(True)
-                self.road_surface_container.setVisible(True)
-                self.zero_container.setVisible(True)
-            elif category == "Bridge":
-                self.deck_line_container.setVisible(True)
-                self.projection_container.setVisible(True)
-                self.construction_dots_container.setVisible(True)
+        # Show correct dimension panels
+        self.three_D_frame.setVisible(dimension == "3D")
+        self.two_D_frame.setVisible(dimension == "2D")
 
-            # Show action buttons
-            self.preview_button.setVisible(True)
-            self.threed_map_button.setVisible(True)
-            self.save_button.setVisible(True)
+        # Show bottom section for Road/Bridge
+        self.bottom_section.setVisible(category in ["Road", "Bridge"])
 
-            # Auto-load point cloud if linked
-            pc_file = config.get("point_cloud_file")
-            if pc_file and os.path.exists(pc_file):
-                self.load_point_cloud_from_path(pc_file)
+        # Reset everything first
+        self.reset_all()
+        self.clear_baseline_planes()
 
-            # Add layer to panel
-            self.add_layer_to_panel(data["layer_name"], dimension)
+        # === STEP 1: Load zero line ===
+        zero_loaded = self.load_zero_line_from_layer(full_layer_path)
 
-            self.message_text.append(
-                f"Opened worksheet: {self.current_worksheet_name}\n"
-                f"→ Section: {data['subfolder_type']}\n"
-                f"→ Layer: {data['layer_name']}"
-            )
-    # =======================================================================================================================================
+        if not zero_loaded:
+            QMessageBox.warning(self, "Zero Line Missing",
+                                "No zero_line_config.json found in the layer.\n"
+                                "Zero line is required for correct baseline mapping.\n"
+                                "You can set it manually later.")
+
+        # === STEP 2: Load all baselines ===
+        loaded_baselines = self.load_all_baselines_from_layer(full_layer_path)
+
+        # === STEP 3: Redraw baselines on 2D graph + check checkboxes ===
+        for ltype in loaded_baselines:
+            checkbox = {
+                'surface': self.surface_baseline,
+                'construction': self.construction_line,
+                'road_surface': self.road_surface_line,
+                'deck_line': self.deck_line,
+                'projection_line': self.projection_line,
+            }.get(ltype)
+
+            if checkbox:
+                checkbox.setChecked(True)
+
+            self.redraw_baseline_on_graph(ltype)
+
+        # === STEP 4: Regenerate 3D planes ===
+        if self.zero_line_set and loaded_baselines:
+            last_width = 10.0
+            if loaded_baselines:
+                first_ltype = list(loaded_baselines.keys())[0]
+                baseline_data = loaded_baselines[first_ltype]
+                last_width = baseline_data.get("width_meters", 10.0)
+
+            self.last_plane_width = last_width
+            self.map_baselines_to_3d_planes_from_data(loaded_baselines, last_width)
+
+        # === STEP 5: Make sure the 2D graph section is VISIBLE ===
+        self.show_graph_section(category)
+
+        # === STEP 6: Show correct baseline containers ===
+        self.surface_container.setVisible(False)
+        self.construction_container.setVisible(False)
+        self.road_surface_container.setVisible(False)
+        self.zero_container.setVisible(False)
+        self.deck_line_container.setVisible(False)
+        self.projection_container.setVisible(False)
+        self.construction_dots_container.setVisible(False)
+        if hasattr(self, 'bridge_zero_container'):
+            self.bridge_zero_container.setVisible(False)
+
+        if category == "Road":
+            self.surface_container.setVisible(True)
+            self.construction_container.setVisible(True)
+            self.road_surface_container.setVisible(True)
+            self.zero_container.setVisible(True)
+        elif category == "Bridge":
+            self.deck_line_container.setVisible(True)
+            self.projection_container.setVisible(True)
+            self.construction_dots_container.setVisible(True)
+            if hasattr(self, 'bridge_zero_container'):
+                self.bridge_zero_container.setVisible(True)
+
+        # Show action buttons
+        self.preview_button.setVisible(True)
+        self.threed_map_button.setVisible(True)
+        self.save_button.setVisible(True)
+
+        self.add_material_line_button.setVisible(False)
+
+        # Add layer to left panel
+        self.add_layer_to_panel(layer_name, dimension)
+
+        # Auto-load point cloud if linked
+        pc_file = config.get("point_cloud_file")
+        if pc_file and os.path.exists(pc_file):
+            self.load_point_cloud_from_path(pc_file)
+
+        # Final feedback
+        self.message_text.append(f"Successfully opened existing worksheet:")
+        self.message_text.append(f"   → Worksheet: {worksheet_name}")
+        self.message_text.append(f"   → Section: {subfolder_type}")
+        self.message_text.append(f"   → Layer: {layer_name}")
+        self.message_text.append(f"   → Baselines loaded: {len(loaded_baselines)} type(s)")
+        self.message_text.append(f"   → Zero line: {'Loaded' if zero_loaded else 'Not found'}")
+        self.message_text.append("   → 2D Graph section is now visible with all baselines.")
+
+        QMessageBox.information(self, "Worksheet Opened",
+                                f"<b>{worksheet_name}</b><br><br>"
+                                f"Layer: <i>{layer_name}</i> ({subfolder_type})<br>"
+                                f"Baselines: {len(loaded_baselines)} type(s) loaded<br>"
+                                f"Zero Line: {'Yes' if zero_loaded else 'No'}<br><br>"
+                                f"2D cross-section graph is now visible with all drawn lines.")
+
+        # Final refresh
+        self.canvas.draw_idle()
+        if hasattr(self, 'vtk_widget'):
+            self.vtk_widget.GetRenderWindow().Render()
+
+# ===========================================================================================================================================================
+    def show_graph_section(self, category):
+        """
+        Ensures the 2D cross-section graph and baseline controls are fully visible
+        when opening an existing worksheet.
+        """
+        # 1. Show the entire bottom section (contains line section + graph)
+        if hasattr(self, 'bottom_section'):
+            self.bottom_section.setVisible(True)
+
+        # 2. Show the collapsible line section (checkboxes)
+        if hasattr(self, 'line_section'):
+            self.line_section.setVisible(True)
+
+        # 3. Expand the line section if it's collapsed
+        if hasattr(self, 'line_content_widget') and not self.line_content_widget.isVisible():
+            self.line_content_widget.show()
+            self.collapse_button.setText("◀")
+            self.collapse_button.setToolTip("Close Line Section")
+            self.undo_button.show()
+            self.redo_button.show()
+            self.line_section.setMaximumWidth(350)
+            self.line_section.setFixedWidth(350)
+
+        # 4. Show scale section (chainage slider + scale bar)
+        if hasattr(self, 'scale_section'):
+            self.scale_section.setVisible(True)
+
+        # 5. Show relevant baseline containers based on category
+        if category == "Road":
+            self.surface_container.setVisible(True)
+            self.construction_container.setVisible(True)
+            self.road_surface_container.setVisible(True)
+            self.zero_container.setVisible(True)
+        elif category == "Bridge":
+            self.deck_line_container.setVisible(True)
+            self.projection_container.setVisible(True)
+            self.construction_dots_container.setVisible(True)
+            if hasattr(self, 'bridge_zero_container'):
+                self.bridge_zero_container.setVisible(True)
+
+        # 6. Show action buttons
+        self.preview_button.setVisible(True)
+        self.threed_map_button.setVisible(True)
+        self.save_button.setVisible(True)
+
+        # 7. Force redraw of matplotlib canvas
+        if hasattr(self, 'canvas'):
+            self.canvas.draw_idle()
+
+        # 8. Force layout update
+        QApplication.processEvents()
+    
+# ===========================================================================================================================================================
+    def load_zero_line_from_layer(self, layer_path):
+        """Load zero_line_config.json from the given layer folder"""
+        json_path = os.path.join(layer_path, "zero_line_config.json")
+        if not os.path.exists(json_path):
+            return False
+
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+            self.zero_start_point = np.array(config["point1"]["coordinates"])
+            self.zero_end_point = np.array(config["point2"]["coordinates"])
+            self.zero_start_z = config["reference_elevation_z"]
+            self.total_distance = config["total_length_m"]
+            self.original_total_distance = self.total_distance
+            self.zero_interval = config.get("interval_m", 20.0)
+            self.zero_start_km = config["point1"].get("km")
+            self.zero_end_km = config["point2"].get("km")
+
+            self.zero_line_set = True
+
+            # Redraw zero line on graph
+            if hasattr(self, 'zero_graph_line') and self.zero_graph_line:
+                self.zero_graph_line.remove()
+            self.zero_graph_line, = self.ax.plot([0, self.total_distance], [0, 0],
+                                                color='purple', linewidth=3)
+
+            # Update ticks and scale
+            self.update_chainage_ticks()
+            if hasattr(self, 'scale_section'):
+                self.scale_section.setVisible(True)
+
+            return True
+        except Exception as e:
+            self.message_text.append(f"Error loading zero line config: {str(e)}")
+            return False
+
+# ===========================================================================================================================================================
+    def load_all_baselines_from_layer(self, layer_path):
+        """Load all *_baseline.json files from layer folder and return dict of loaded data"""
+        loaded = {}
+        possible_files = [
+            "surface_baseline.json",
+            "construction_baseline.json",
+            "road_surface_baseline.json",
+            "deck_line_baseline.json",
+            "projection_line_baseline.json",
+            "material_baseline.json"
+        ]
+
+        key_map = {
+            "surface_baseline.json": "surface",
+            "construction_baseline.json": "construction",
+            "road_surface_baseline.json": "road_surface",
+            "deck_line_baseline.json": "deck_line",
+            "projection_line_baseline.json": "projection_line",
+            "material_baseline.json": "material",
+        }
+
+        for filename in possible_files:
+            filepath = os.path.join(layer_path, filename)
+            if not os.path.exists(filepath):
+                continue
+
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                ltype = key_map[filename]
+                loaded[ltype] = data
+
+                # Store polylines in memory
+                polylines_2d = []
+                for poly in data.get("polylines", []):
+                    poly_2d = []
+                    for pt in poly["points"]:
+                        poly_2d.append((pt["chainage_m"], pt["relative_elevation_m"]))
+                    if len(poly_2d) >= 2:
+                        polylines_2d.append(poly_2d)
+
+                self.line_types[ltype]['polylines'] = polylines_2d
+
+            except Exception as e:
+                self.message_text.append(f"Error loading {filename}: {str(e)}")
+
+        return loaded
+
+# ===========================================================================================================================================================
+    def redraw_baseline_on_graph(self, ltype):
+        """Redraw a loaded baseline on the 2D matplotlib graph"""
+        color = self.line_types[ltype]['color']
+        for poly_2d in self.line_types[ltype]['polylines']:
+            if len(poly_2d) < 2:
+                continue
+            xs = [p[0] for p in poly_2d]
+            ys = [p[1] for p in poly_2d]
+            line, = self.ax.plot(xs, ys, color=color, linewidth=2.5)
+            self.line_types[ltype]['artists'].append(line)
+
+        self.canvas.draw_idle()
+
+# ===========================================================================================================================================================
+    def map_baselines_to_3d_planes_from_data(self, loaded_baselines, width):
+        """Regenerate 3D planes from loaded baseline data (same logic as map_baselines_to_3d_planes but from dict)"""
+        if not self.zero_line_set:
+            return
+
+        half_width = width / 2.0
+        zero_dir_vec = self.zero_end_point - self.zero_start_point
+        zero_length = self.total_distance
+        ref_z = self.zero_start_z
+
+        for ltype, baseline_data in loaded_baselines.items():
+            rgba = self.plane_colors.get(ltype, (0.5, 0.5, 0.5, 0.4))
+            color_rgb = rgba[:3]
+            opacity = rgba[3]
+
+            for poly in baseline_data.get("polylines", []):
+                points_3d = poly["points"]
+                if len(points_3d) < 2:
+                    continue
+
+                for i in range(len(points_3d) - 1):
+                    pt1 = points_3d[i]
+                    pt2 = points_3d[i + 1]
+
+                    center1 = np.array(pt1["world_coordinates"])
+                    center2 = np.array(pt2["world_coordinates"])
+
+                    seg_dir = center2 - center1
+                    seg_len = np.linalg.norm(seg_dir)
+                    if seg_len < 1e-6:
+                        continue
+                    seg_unit = seg_dir / seg_len
+
+                    horiz = np.array([seg_unit[0], seg_unit[1], 0.0])
+                    hlen = np.linalg.norm(horiz)
+                    if hlen < 1e-6:
+                        zero_unit = zero_dir_vec / np.linalg.norm(zero_dir_vec)
+                        perp = np.array([-zero_unit[1], zero_unit[0], 0.0])
+                    else:
+                        horiz /= hlen
+                        perp = np.array([-horiz[1], horiz[0], 0.0])
+
+                    perp_len = np.linalg.norm(perp)
+                    if perp_len > 0:
+                        perp /= perp_len
+
+                    c1 = center1 + perp * half_width
+                    c2 = center1 - perp * half_width
+                    c3 = center2 - perp * half_width
+                    c4 = center2 + perp * half_width
+
+                    plane = vtkPlaneSource()
+                    plane.SetOrigin(c1[0], c1[1], c1[2])
+                    plane.SetPoint1(c4[0], c4[1], c4[2])
+                    plane.SetPoint2(c2[0], c2[1], c2[2])
+                    plane.SetXResolution(12)
+                    plane.SetYResolution(2)
+                    plane.Update()
+
+                    mapper = vtkPolyDataMapper()
+                    mapper.SetInputConnection(plane.GetOutputPort())
+
+                    actor = vtkActor()
+                    actor.SetMapper(mapper)
+                    actor.GetProperty().SetColor(*color_rgb)
+                    actor.GetProperty().SetOpacity(opacity)
+                    actor.GetProperty().EdgeVisibilityOn()
+                    actor.GetProperty().SetEdgeColor(*color_rgb)
+                    actor.GetProperty().SetLineWidth(1.5)
+
+                    self.renderer.AddActor(actor)
+                    self.baseline_plane_actors.append(actor)
+
+        self.vtk_widget.GetRenderWindow().Render()
+# =======================================================================================================================================
     def load_point_cloud_files(self, file_list):
         """Load multiple point cloud files (merge or first one) - currently loads first file with progress bar"""
         if not file_list:
@@ -1488,13 +1741,13 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(f"Failed to load point cloud '{os.path.basename(file_path)}': {str(e)}")
             QMessageBox.warning(self, "Load Failed", f"Could not load point cloud:\n{file_path}\n\nError: {str(e)}")
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def show_help_dialog(self):
         """Open the Help Dialog when Help button is clicked"""
         dialog = HelpDialog(self)
         dialog.exec_()  # Modal – blocks until closed
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def save_current_lines_state(self):
         """Save the current graph lines state when switching between modes"""
         if self.current_mode == 'road':
@@ -1541,7 +1794,7 @@ class PointCloudViewer(ApplicationUI):
             }
             self.message_text.append("Bridge lines state saved")
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def restore_saved_lines_state(self, mode):
         """Restore saved graph lines for a specific mode"""
         if mode == 'road' and self.road_lines_data:
@@ -1601,7 +1854,7 @@ class PointCloudViewer(ApplicationUI):
         self.canvas.draw()
         self.figure.tight_layout()
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def clear_graph_for_switch(self):
         """Clear graph when switching between road and bridge modes"""
         # Clear current drawing session
@@ -1648,7 +1901,7 @@ class PointCloudViewer(ApplicationUI):
         
         self.message_text.append("Graph cleared for mode switch")
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def clear_graph_for_mode(self, mode):
         """Clear graph lines for specific mode only"""
         if mode == 'road':
@@ -1660,7 +1913,7 @@ class PointCloudViewer(ApplicationUI):
             for line_type in ['deck_line', 'projection_line', 'construction_dots']:
                 self.clear_line_type(line_type)
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def clear_line_type(self, line_type):
         """Clear a specific line type from the graph"""
         if line_type in self.line_types:
@@ -1705,8 +1958,8 @@ class PointCloudViewer(ApplicationUI):
                     except:
                         pass
         
-    # =======================================================================================================================================
-    # ON CHECKBOX CHANGED 
+# =======================================================================================================================================
+# ON CHECKBOX CHANGED 
     def on_checkbox_changed(self, state, line_type):
         if state == Qt.Checked:
             if line_type == 'construction_dots':
@@ -1839,52 +2092,11 @@ class PointCloudViewer(ApplicationUI):
                 self.canvas.draw()
                 self.figure.tight_layout()
 
-    # =======================================================================================================================================
-    # UPDATE CHAINAGE TICKS ON GRAPHS
-    # def update_chainage_ticks(self):
-    #     """Update X-axis ticks on main graph and scale with safe integer chainage labels"""
-    #     if not self.zero_line_set or not hasattr(self, 'zero_interval') or self.zero_interval <= 0:
-    #         return
-
-    #     # Force interval to integer (it should always be whole meters like 20, 50, etc.)
-    #     interval = int(self.zero_interval)
-    #     start_km = getattr(self, 'zero_start_km', 0) if hasattr(self, 'zero_start_km') and self.zero_start_km is not None else 0
-
-    #     tick_positions = []
-    #     tick_labels = []
-
-    #     current_pos = 0
-    #     while current_pos <= self.total_distance + interval:
-    #         tick_positions.append(current_pos)
-
-    #         # Calculate exact multiple of interval
-    #         interval_number = int(round(current_pos / interval))
-    #         interval_value_meters = interval_number * interval
-
-    #         # Format as KM + 3-digit meters (e.g., 101+020)
-    #         tick_labels.append(f"{start_km}+{interval_value_meters:03d}")
-
-    #         current_pos += interval
-
-    #     # Update main graph
-    #     self.ax.set_xticks(tick_positions)
-    #     self.ax.set_xticklabels(tick_labels)
-
-    #     # Update scale graph if exists
-    #     if hasattr(self, 'scale_ax') and self.scale_ax is not None:
-    #         self.scale_ax.set_xticks(tick_positions)
-    #         self.scale_ax.set_xticklabels(tick_labels, rotation=30, ha='right')
-
-    #     self.canvas.draw()
-    #     if hasattr(self, 'scale_canvas'):
-    #         self.scale_canvas.draw()
-    #     self.figure.tight_layout()
-
-
-
+# =======================================================================================================================================
+# UPDATE CHAINAGE TICKS ON GRAPHS
     def update_chainage_ticks(self):
         """Update both the top Chainage Scale and the main graph X-axis with KM+interval ticks."""
-        if not (self.zero_line_set and hasattr(self, 'zero_interval') and self.zero_interval and 
+        if not (self.zero_line_set and hasattr(self, 'zero_interval') and self.zero_interval and
                 hasattr(self, 'zero_start_km') and self.zero_start_km is not None):
             # Fallback to simple distance if no proper chainage config
             if hasattr(self, 'scale_ax') and self.scale_ax:
@@ -1893,54 +2105,59 @@ class PointCloudViewer(ApplicationUI):
                 self.scale_canvas.draw_idle() if hasattr(self, 'scale_canvas') else None
             self.ax.set_xlabel('Distance (m)')
             self.ax.set_xticks(np.linspace(0, self.total_distance, 10))
-            self.ax.set_xticklabels([f"{int(x)}m" for x in np.linspace(0, self.total_distance, 10)])
+            self.ax.set_xticklabels([f"{int(x)}m" for x in np.linspace(0, self.total_distance + 1, 10)])
             self.canvas.draw_idle()
             return
 
-        # Calculate number of intervals
+        # Calculate tick positions
         num_intervals = int(self.total_distance / self.zero_interval)
         tick_positions = [i * self.zero_interval for i in range(num_intervals + 1)]
         tick_labels = []
-
         current_km = self.zero_start_km
-        for i, pos in enumerate(tick_positions):
-            interval_val = i * self.zero_interval
-            if interval_val >= 1000:  # Very long sections – increase KM
-                additional_km = int(interval_val // 1000)
+        remaining = self.total_distance
+        for i in range(num_intervals + 1):
+            interval_value = i * self.zero_interval
+            if interval_value >= 1000:
+                additional_km = int(interval_value // 1000)
                 current_km += additional_km
-                interval_val = interval_val % 1000
-            label = f"{current_km}+{int(interval_val):03d}"
+                interval_value %= 1000
+            label = f"{current_km}+{int(interval_value):03d}"
             tick_labels.append(label)
 
-        # === Update Top Chainage Scale (orange bar) ===
+        # === UPDATE TOP CHAINAGE SCALE (Orange bar) ===
         if hasattr(self, 'scale_ax') and self.scale_ax:
             self.scale_ax.clear()
-            self.scale_ax.plot([0, self.total_distance], [0, 0], color='black', linewidth=2)
+            self.scale_ax.plot([0, self.total_distance], [0, 0], color='black', linewidth=3)
             self.scale_ax.set_xlim(0, self.total_distance)
-            self.scale_ax.set_ylim(-0.5, 0.5)
+            self.scale_ax.set_ylim(-0.1, 1.2)
             self.scale_ax.set_yticks([])
             self.scale_ax.set_xticks(tick_positions)
-            self.scale_ax.set_xticklabels(tick_labels, rotation=45, ha='right', fontsize=9)
-            self.scale_ax.set_title("Chainage Scale", fontsize=11, weight='bold', pad=10)
+            self.scale_ax.set_xticklabels(tick_labels, rotation=15, ha='right', fontsize=8)
+            self.scale_ax.set_title("Chainage Scale", fontsize=10, pad=10, color='#D35400')
             self.scale_ax.spines['bottom'].set_visible(True)
             self.scale_ax.spines['top'].set_visible(False)
             self.scale_ax.spines['left'].set_visible(False)
             self.scale_ax.spines['right'].set_visible(False)
-            self.scale_ax.tick_params(axis='x', which='both', length=6)
+            self.scale_ax.tick_params(axis='x', which='both', length=8, width=1, colors='black')
+            self.scale_ax.set_facecolor('#FFE5B4')  # Light orange background for better visibility
             if hasattr(self, 'scale_canvas'):
                 self.scale_canvas.draw_idle()
 
-        # === Update Main Graph X-axis ===
+        # === UPDATE MAIN GRAPH X-AXIS ===
         self.ax.set_xlim(0, self.total_distance)
         self.ax.set_xticks(tick_positions)
-        self.ax.set_xticklabels(tick_labels, rotation=45, ha='right', fontsize=9)
-        self.ax.set_xlabel('Chainage (KM + Interval)')
-        self.ax.grid(True, axis='x', linestyle='--', alpha=0.5)
+        self.ax.set_xticklabels(tick_labels, rotation=15, ha='right', fontsize=8)
+        self.ax.set_xlabel('Chainage (KM + Interval)', fontsize=10, labelpad=10)
+        self.ax.grid(True, axis='x', linestyle='--', alpha=0.6, linewidth=1.2)
+
+        # Improve Y-axis readability
+        self.ax.tick_params(axis='y', labelsize=10)
+        self.ax.set_ylabel('Relative Elevation (m)', fontsize=10, labelpad=10)
 
         self.canvas.draw_idle()
 
-    # =======================================================================================================================================
-    # UPDATE SCALE MARKER BASED ON SLIDER
+# =======================================================================================================================================
+# UPDATE SCALE MARKER BASED ON SLIDER
     def update_scale_marker(self):
         """Update red marker and chainage label when volume slider moves"""
         if not self.zero_line_set or not hasattr(self, 'scale_ax'):
@@ -1986,7 +2203,7 @@ class PointCloudViewer(ApplicationUI):
 
         self.scale_canvas.draw()
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def update_main_graph_marker(self, slider_value):
         """Update orange vertical marker on main 2D graph"""
         if not self.zero_line_set:
@@ -2018,7 +2235,7 @@ class PointCloudViewer(ApplicationUI):
 
         self.canvas.draw_idle()
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def on_graph_scrolled(self):
         """Update slider position when graph is manually scrolled"""
         if not hasattr(self, 'graph_horizontal_scrollbar') or not self.volume_slider:
@@ -2043,7 +2260,7 @@ class PointCloudViewer(ApplicationUI):
                     self.update_scale_marker()
                     self.update_main_graph_marker(slider_value)
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def complete_line_with_double_click(self):
         """Complete the current line when double-clicked"""
         if self.active_line_type and len(self.current_points) > 1:
@@ -2052,14 +2269,14 @@ class PointCloudViewer(ApplicationUI):
         elif self.active_line_type and len(self.current_points) == 1:
             self.message_text.append("Need at least 2 points to create a line. Add more points before double-clicking.")              
 
-    # =======================================================================================================================================   
+# =======================================================================================================================================   
     def on_key_press(self, event):
         if event.key == 'escape' and self.active_line_type and self.current_points:
             self.finish_current_polyline()
             self.message_text.append(f"{self.active_line_type.replace('_', ' ').title()} completed with Escape key")
 
-    # =======================================================================================================================================
-    # Add a helper method to format chainage labels:
+# =======================================================================================================================================
+# Add a helper method to format chainage labels:
     def get_chainage_label(self, position):
         """Return formatted chainage string like '101+020' for any position"""
         if not self.zero_line_set or not hasattr(self, 'zero_interval') or self.zero_interval <= 0:
@@ -2073,8 +2290,8 @@ class PointCloudViewer(ApplicationUI):
 
         return f"{start_km}+{interval_value_meters:03d}"
 
-    # =======================================================================================================================================
-    # UPDATE ZERO ACTORS
+# =======================================================================================================================================
+# UPDATE ZERO ACTORS
     def update_zero_actors(self):
         if not self.zero_line_set:
             return
@@ -2122,8 +2339,8 @@ class PointCloudViewer(ApplicationUI):
         self.figure.tight_layout()
         self.vtk_widget.GetRenderWindow().Render()
 
-    # =======================================================================================================================================
-    # In the update_scale_ticks method, improve the tick labels:
+# =======================================================================================================================================
+# In the update_scale_ticks method, improve the tick labels:
     def update_scale_ticks(self):
         """Rebuild the chainage scale below the 3D view with correct KM+Interval labels"""
         if not self.zero_line_set or not hasattr(self, 'zero_interval') or self.zero_interval <= 0:
@@ -2168,8 +2385,9 @@ class PointCloudViewer(ApplicationUI):
 
         self.scale_section.setVisible(True)
         self.scale_canvas.draw()
-    # =======================================================================================================================================
-    # EDIT ZERO LINE
+
+# =======================================================================================================================================
+# EDIT ZERO LINE
     def edit_zero_line(self):
         if not self.zero_line_set:
             return
@@ -2222,7 +2440,7 @@ class PointCloudViewer(ApplicationUI):
             except ValueError:
                 QMessageBox.warning(self, "Invalid Input", "Please enter valid numbers.")
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def edit_construction_dots_line(self):
         if not self.construction_dots_line.isChecked():
             return
@@ -2259,7 +2477,7 @@ class PointCloudViewer(ApplicationUI):
         #     self.message_text.append(f"Construction Dots Config: Spacing: {config['spacing']}, Size: {config['size']}")
             # Add further logic here if needed (e.g., apply construction dots settings)
 
-    # =======================================================================================================================================
+# =======================================================================================================================================
     def edit_deck_line(self):
         if not self.deck_line.isChecked():
             return
@@ -2269,8 +2487,8 @@ class PointCloudViewer(ApplicationUI):
         #     self.message_text.append(f"Deck Line Config: Thickness: {config['thickness']}, Material: {config['material']}")
             # Add further logic here if needed (e.g., apply deck line settings)
 
-    # =========================================================================================================================================================
-    # # CURVE BUTTON HANDLER
+# =========================================================================================================================================================
+# # CURVE BUTTON HANDLER
     def on_curve_button_clicked(self, event=None):
         """Handle Curve button and annotation clicks"""
         # Clicked on any curve label → edit
@@ -2584,9 +2802,6 @@ class PointCloudViewer(ApplicationUI):
         return None
 
 # ===========================================================================================================================================================
-    #-------------------------------------------------
-    # UNDO GRAPH (Modified)
-    # -------------------------------------------------
     def undo_graph(self):
         if self.active_line_type is None:
             return
@@ -2659,9 +2874,7 @@ class PointCloudViewer(ApplicationUI):
             self.canvas.draw()
             self.figure.tight_layout()
 
-    # -------------------------------------------------
-    # REDO GRAPH (Modified)
-    # -------------------------------------------------
+# ===========================================================================================================================================================
     def redo_graph(self):
         if self.active_line_type is None:
             return
@@ -2725,9 +2938,7 @@ class PointCloudViewer(ApplicationUI):
             self.canvas.draw()
             self.figure.tight_layout()
 
-    # -------------------------------------------------
-    # FINISH CURRENT POLYLINE (Modified)
-    # -------------------------------------------------
+# ===========================================================================================================================================================
     def finish_current_polyline(self):
         if self.active_line_type == 'construction_dots':
             # For construction dots - store as individual points without connecting line
@@ -2829,9 +3040,8 @@ class PointCloudViewer(ApplicationUI):
             self.current_artist.remove()
             self.current_artist = None
         self.message_text.append(f"{self.active_line_type.replace('_', ' ').title()} completed")
-    # -------------------------------------------------
-    # ADD POINT LABEL (New method)
-    # -------------------------------------------------
+
+# ===========================================================================================================================================================
     def add_point_label(self, x, y, point_number, line_type):
         """Add a small label above the clicked point on the graph - ONLY for construction dots"""
         # Only create labels for construction dots
@@ -2875,9 +3085,7 @@ class PointCloudViewer(ApplicationUI):
         
         return text_obj
     
-    # -------------------------------------------------
-    # ON DRAW CLICK (Modified)
-    # -------------------------------------------------
+# ===========================================================================================================================================================
     def on_draw_click(self, event):
         if event.inaxes != self.ax or self.active_line_type is None:
             return
@@ -2949,9 +3157,7 @@ class PointCloudViewer(ApplicationUI):
         self.last_click_time = current_time
         self.canvas.draw_idle()
 
-    # -------------------------------------------------
-    # LOAD POINT CLOUD
-    # -------------------------------------------------
+# ===========================================================================================================================================================
     def load_point_cloud(self):
         file_dialog = QFileDialog()
         file_path, _ = file_dialog.getOpenFileName(
@@ -3047,8 +3253,8 @@ class PointCloudViewer(ApplicationUI):
         self.vtk_widget.GetRenderWindow().Render()
         self.update_progress(100, "Ready!")
 
-    # ========================================================================================================
-    # Define function for the mesurement type:
+# ========================================================================================================
+# Define function for the mesurement type:
     def set_measurement_type(self, m_type):
         """Set the measurement type and configure the UI and state accordingly."""
         if not self.measurement_active:
@@ -3087,8 +3293,8 @@ class PointCloudViewer(ApplicationUI):
             # Hide the presized button for other measurement types
             self.presized_button.setVisible(False)
 
-    # =================================================================================================================================
-    # Define the function for the update the mesurement metrics as per the selected metrics::
+# =================================================================================================================================
+# Define the function for the update the mesurement metrics as per the selected metrics::
     def update_measurement_metrics(self):
         """Update all measurements when the units change"""
         if not hasattr(self, 'measurement_points') or not self.measurement_points:
@@ -3120,7 +3326,7 @@ class PointCloudViewer(ApplicationUI):
                     continue
         self.vtk_widget.GetRenderWindow().Render()
 
-    # ==================================================================================================================================
+# ==================================================================================================================================
     def get_current_units(self):
         """Get the current units and conversion factor from meters"""
         current_units = self.metrics_combo.currentText()
@@ -3132,8 +3338,8 @@ class PointCloudViewer(ApplicationUI):
             return "mm", 1000.0
         return "m", 1.0
     
-    # ==================================================================================================================================
-    # Convert the metrics from meter to cm and mm::
+# ==================================================================================================================================
+# Convert the metrics from meter to cm and mm::
     def convert_to_current_units(self, value_in_meters):
         """Convert a value in meters to the currently selected units"""
         current_units = self.metrics_combo.currentText()
@@ -3145,8 +3351,8 @@ class PointCloudViewer(ApplicationUI):
             return value_in_meters * 1000
         return value_in_meters
     
-    # ==================================================================================================================================
-    # Define the function for the get curent metrics of measurement
+# ==================================================================================================================================
+# Define the function for the get curent metrics of measurement
     def get_units_suffix(self):
         """Get the suffix for the current units"""
         current_units = self.metrics_combo.currentText()
@@ -3158,8 +3364,8 @@ class PointCloudViewer(ApplicationUI):
             return "mm"
         return ""
     
-    # ==================================================================================================================================
-    # Define function to add sphere marker:
+# ==================================================================================================================================
+# Define function to add sphere marker:
     def add_sphere_marker(self, point, label=None, radius = 0.07, color="Red"):
         """Add a sphere marker at the specified position with optional label"""
         sphere = vtkSphereSource()
@@ -3191,7 +3397,7 @@ class PointCloudViewer(ApplicationUI):
         self.vtk_widget.GetRenderWindow().Render()
         return actor # Return the sphere actor
     
-    # ==================================================================================================================================
+# ==================================================================================================================================
     def find_nearest_point_in_neighborhood(self, click_pos, search_radius=4):
         """Find the nearest point in a neighborhood around the click position.
         Args:
@@ -3229,8 +3435,8 @@ class PointCloudViewer(ApplicationUI):
         closest_idx = valid_indices[np.argmin(distances[valid_indices])]
         return points[closest_idx]
     
-    # =========================================================================================================================================
-    # Define function for connect two points:
+# =========================================================================================================================================
+# Define function for connect two points:
     def add_line_between_points(self, p1, p2, color, label=None, show_label=True):
         line = vtkLineSource()
         line.SetPoint1(p1[0], p1[1], p1[2])
@@ -3287,8 +3493,8 @@ class PointCloudViewer(ApplicationUI):
             self.vtk_widget.GetRenderWindow().Render()
             return actor
         
-    # ==================================================================================================================================
-    # Define function add angle label on point cloud data point:
+# ==================================================================================================================================
+# Define function add angle label on point cloud data point:
     def add_angle_label(self, a, b, c, label, offset=0.8):
         """Add a label showing the angle between points a-b-c at position b"""
         # Calculate position slightly away from point b
@@ -3309,7 +3515,7 @@ class PointCloudViewer(ApplicationUI):
         self.measurement_actors.append(text_actor)
         self.vtk_widget.GetRenderWindow().Render()
         
-    # =========================================================================================================
+# =========================================================================================================
     def add_text_label(self, position, text, color="Blue", scale=0.5, z_offset=0.0):
         """Add a text label at specified position"""
         try:
@@ -3343,7 +3549,7 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             print(f"Error adding text label: {e}")
             
-    # ==================================================================================================================================
+# ==================================================================================================================================
     def on_click(self, obj, event):
         if self.drawing_zero_line:
             interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
@@ -3533,9 +3739,7 @@ class PointCloudViewer(ApplicationUI):
         interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
         self.vtk_widget.GetRenderWindow().Render()
         
-    # -------------------------------------------------
-    # RESET ZERO DRAWING
-    # -------------------------------------------------
+# ===========================================================================================================================================================
     def reset_zero_drawing(self):
         for actor in self.temp_zero_actors:
             self.renderer.RemoveActor(actor)
@@ -3549,8 +3753,8 @@ class PointCloudViewer(ApplicationUI):
         self.scale_ax.set_xticklabels([f"{x:.0f}" for x in np.arange(0, self.total_distance + 1, 5)])
         self.scale_canvas.draw()
         
-    # =================================================================================================================
-    # Define function for the connect the points which is already drawn on point cloud data:
+# =================================================================================================================
+# Define function for the connect the points which is already drawn on point cloud data:
     def connect_signals(self):
         # Connect UI signals
         self.reset_action_button.clicked.connect(self.reset_action)
@@ -3578,7 +3782,6 @@ class PointCloudViewer(ApplicationUI):
         self.bridge_zero_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'zero'))
         self.projection_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'projection_line'))
         self.construction_dots_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'construction_dots'))
-        self.material_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'material'))
         self.deck_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'deck_line'))
         
         # Connect pencil button signals
@@ -3586,11 +3789,8 @@ class PointCloudViewer(ApplicationUI):
         self.bridge_zero_pencil.clicked.connect(self.edit_zero_line)
         self.construction_dots_pencil.clicked.connect(self.edit_construction_dots_line)
         self.deck_pencil.clicked.connect(self.edit_deck_line)
-        self.material_pencil.clicked.connect(self.edit_material_line)
-        
-        # Connect slider and scrollbar signals
-        #self.volume_slider.valueChanged.connect(self.on_slider_changed)
-
+        self.add_material_line_button.clicked.connect(self.open_material_line_dialog)
+   
         self.volume_slider.valueChanged.connect(self.volume_changed)
         
         # Connect graph hover event
@@ -3599,7 +3799,8 @@ class PointCloudViewer(ApplicationUI):
         # Connect undo/redo buttons
         self.undo_button.clicked.connect(self.undo_graph)
         self.redo_button.clicked.connect(self.redo_graph)
-        
+
+
         # Add both left and right click events
         self.vtk_widget.GetRenderWindow().GetInteractor().AddObserver(
             "LeftButtonPressEvent", self.on_click)
@@ -3607,6 +3808,7 @@ class PointCloudViewer(ApplicationUI):
         self.vtk_widget.GetRenderWindow().GetInteractor().AddObserver(
             "KeyPressEvent", self.on_key_press)
 
+# ===========================================================================================================================================================
     def on_slider_changed(self, value):
         """Handle slider change with graph scrolling"""
         # Call the original volume_changed logic
@@ -3621,7 +3823,7 @@ class PointCloudViewer(ApplicationUI):
         if self.zero_line_set:
             self.update_main_graph_marker(value)
 
-    # ==================================================================================================================================
+# ==================================================================================================================================
     def process_vertical_line_measurement(self):
         """Process vertical line measurement and calculate volume for round pillar if applicable."""
         if len(self.measurement_points) != 2:
@@ -3666,7 +3868,7 @@ class PointCloudViewer(ApplicationUI):
         }
         self.vtk_widget.GetRenderWindow().Render()
         
-    # ==================================================================================================================================
+# ==================================================================================================================================
     def process_horizontal_line_measurement(self):
         """Process horizontal line measurement with two points"""
         if len(self.measurement_points) != 2:
@@ -3702,8 +3904,8 @@ class PointCloudViewer(ApplicationUI):
         # Output results
         self.message_text.append(f"--- Horizontal line ---\n PQ: {distance:.2f} {units_suffix}")
         
-    # ===========================================================================================================================
-    # Define function for the Polygon Measurements:
+# ===========================================================================================================================
+# Define function for the Polygon Measurements:
     def process_polygon_measurement(self):
         """Process polygon measurement on any plane using triangulation for area calculation"""
         if len(self.measurement_points) < 3:
@@ -3816,7 +4018,7 @@ class PointCloudViewer(ApplicationUI):
         self.message_text.append(f"Polygon Surface Area = {area:.2f} {area_suffix}")
         self.message_text.append(f"Polygon Perimeter = {perimeter:.2f} {perimeter_suffix}")
         
-    # ==================================================================================================================================
+# ==================================================================================================================================
     def complete_polygon(self):
         self.plotting_active = False
         if self.current_measurement != 'polygon' and self.current_measurement != 'round_pillar_polygon':
@@ -3850,8 +4052,8 @@ class PointCloudViewer(ApplicationUI):
         self.complete_polygon_button.setStyleSheet("") # Reset to default style
         self.vtk_widget.GetRenderWindow().Render()
         
-    # ==================================================================================================================================
-    #Define the function for the handle the Presized button action:
+# ==================================================================================================================================
+#Define the function for the handle the Presized button action:
     def handle_presized_button(self):
         """Handle the Presized button click for round pillar measurement."""
         if (hasattr(self, 'current_measurement') and
@@ -3943,8 +4145,8 @@ class PointCloudViewer(ApplicationUI):
             except Exception as e:
                 self.message_text.append(f"Error creating presized horizontal line")
                 
-    # ===========================================================================================================================
-    # define the function for the create a presized horizontal line::
+# ===========================================================================================================================
+# define the function for the create a presized horizontal line::
     def create_presized_horizontal_line(self):
         """Create a new straight horizontal line from point P to point R with offset points in XY, XZ, YZ planes"""
         if not hasattr(self, 'measurement_points') or len(self.measurement_points) < 2:
@@ -4002,8 +4204,8 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             self.message_text.append(f"Error creating presized horizontal line: {str(e)}")
             
-    # ===========================================================================================================================
-    # Define the function for the Create Presized Vertical Line::
+# ===========================================================================================================================
+# Define the function for the Create Presized Vertical Line::
     def create_presized_vertical_line(self):
         """Create a new vertical line from point A to point C (same height as B) when Presized is clicked"""
         if not hasattr(self, 'measurement_points') or len(self.measurement_points) < 2:
@@ -4061,8 +4263,8 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             self.message_text.append(f"Error creating presized vertical line: {str(e)}")
             
-    # ==========================================================================================================================
-    # Define function for Key press handler for Space bar freeze/unfreeze
+# ==========================================================================================================================
+# Define function for Key press handler for Space bar freeze/unfreeze
     def on_key_press(self, obj, event):
         """Handle key press events"""
         key = obj.GetKeySym()
@@ -4093,8 +4295,8 @@ class PointCloudViewer(ApplicationUI):
                 # self.output_list.addItem("View unfrozen")
             self.vtk_widget.GetRenderWindow().Render()
 
-    # ============================================================================================================================
-    # RESET ACTION (Modified)
+# ============================================================================================================================
+# RESET ACTION (Modified)
     def reset_action(self):
         """Reset the current active line type's drawings from the graph"""
         if self.active_line_type:
@@ -4224,8 +4426,8 @@ class PointCloudViewer(ApplicationUI):
             QPushButton:hover { background-color: #6E6E6E; }
         """)
             
-    # ============================================================================================================================
-    # Define the function for the reset all:
+# ============================================================================================================================
+# Define the function for the reset all:
     def reset_all(self):
         """Reset ALL lines from the graph"""
         # First call reset_action to handle any current drawing
@@ -4464,8 +4666,6 @@ class PointCloudViewer(ApplicationUI):
             self.vtk_widget.GetRenderWindow().Render()
 
 
-
-
         # Clear all curve labels
         if hasattr(self, 'curve_labels'):
             for label in self.curve_labels:
@@ -4497,9 +4697,7 @@ class PointCloudViewer(ApplicationUI):
         self.curve_3d_actors.clear()
         self.curve_start_point_3d = None
 
-    # -------------------------------------------------
-    # Graph plot (placeholder for future use) - now embedded in canvas
-    # -------------------------------------------------
+# ===========================================================================================================================================================
     def plot_graph(self, x, y):
         if self.ax:
             self.ax.clear()
@@ -4558,6 +4756,7 @@ class PointCloudViewer(ApplicationUI):
         self.vtk_widget.GetRenderWindow().Render()
         self.message_text.append("Preview lines mapped on 3D point cloud.")
 
+# ===========================================================================================================================================================
     def add_preview_line(self, p1, p2, color):
         line = vtkLineSource()
         line.SetPoint1(p1[0], p1[1], p1[2])
@@ -4573,9 +4772,8 @@ class PointCloudViewer(ApplicationUI):
 
 
 
-    # =================================================================================================================================
-    # MAP ROAD BASELINES TO 3D PLANES
-    # =================================================================================================================================
+# =================================================================================================================================
+# MAP ROAD BASELINES TO 3D PLANES
     def map_baselines_to_3d_planes(self):
         """
         Main function: Called when user clicks 'Map on 3D' button.
@@ -4720,6 +4918,7 @@ class PointCloudViewer(ApplicationUI):
             "• Material → Yellow"
         )
 
+# ===========================================================================================================================================================
     def clear_baseline_planes(self):
         """Remove ALL accumulated baseline plane actors — used only on reset or new worksheet."""
         for actor in self.baseline_plane_actors:
@@ -4728,9 +4927,9 @@ class PointCloudViewer(ApplicationUI):
         self.baseline_plane_actors.clear()
         if hasattr(self, 'vtk_widget'):
             self.vtk_widget.GetRenderWindow().Render()
+
 # ================================================================================================================================
-# ** Back End (Logic) **
-# ================================================================================================================================
+
     def changeEvent(self, event):
         super(PointCloudViewer, self).changeEvent(event)
         if event.type() == QEvent.WindowStateChange:
@@ -4750,7 +4949,6 @@ class PointCloudViewer(ApplicationUI):
             self.vtk_widget.GetRenderWindow().Render()
 
 # =================================================================================================================================
-
     def load_point_cloud_from_path(self, file_path: str):
         """
         Load a point cloud from a given file path without showing QFileDialog.
@@ -4808,9 +5006,7 @@ class PointCloudViewer(ApplicationUI):
             return False
         
 
-    # -------------------------------------------------
-    # New: Focus camera on full point cloud
-    # -------------------------------------------------
+# ===========================================================================================================================================================
     def focus_camera_on_full_cloud(self):
         """Focus camera on the entire point cloud"""
         if not self.point_cloud or not self.point_cloud_actor:
@@ -4838,9 +5034,7 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             print(f"Error in full cloud focus: {e}")
 
-    # -------------------------------------------------
-    # New: Focus camera on section along zero line
-    # -------------------------------------------------
+# ===========================================================================================================================================================
     def update_camera_view(self, slider_value):
         """Update camera to always look at the current slider marker (red sphere) from a fixed side view."""
         if not self.zero_line_set or not self.point_cloud:
@@ -4894,7 +5088,7 @@ class PointCloudViewer(ApplicationUI):
             print(f"Error updating camera view: {e}")
             self.focus_camera_on_full_cloud()
 
-
+# ===========================================================================================================================================================
     def volume_changed(self, value):
         """Main handler when volume slider moves – keeps marker and camera perfectly aligned."""
         print(f"Volume slider changed to: {value}%")
@@ -4917,7 +5111,7 @@ class PointCloudViewer(ApplicationUI):
         # Always scroll the 2D graph horizontally
         self.scroll_graph_with_slider(value)
 
-
+# ===========================================================================================================================================================
     def add_or_update_slider_marker(self, world_pos):
         """Create or move the red sphere that marks the current slider/chainage position"""
         if self.slider_marker_actor is None:
@@ -4995,7 +5189,6 @@ class PointCloudViewer(ApplicationUI):
             'road_surface': self.road_surface_line,
             'deck_line': self.deck_line,
             'projection_line': self.projection_line,
-            'material': self.material_line,
         }
 
         for ltype, checkbox in baseline_checkboxes.items():
@@ -5226,3 +5419,7 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(error_msg)
             QMessageBox.critical(self, "Save Failed", error_msg)
             return False
+        
+# ========================================================================================================================================
+#                                                   *** END OF APPLICAATION ***
+# =======================================================================================================================================      
