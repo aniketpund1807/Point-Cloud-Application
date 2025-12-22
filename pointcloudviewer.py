@@ -21,6 +21,8 @@ from vtkmodules.vtkRenderingCore import (vtkActor, vtkPolyDataMapper)
 
 from vtkmodules.vtkFiltersSources import vtkPlaneSource
 
+# from vtk.util.numpy_support import numpy_to_vtk
+
 
 from datetime import datetime
 from math import sqrt, degrees
@@ -1296,234 +1298,376 @@ class PointCloudViewer(ApplicationUI):
             QMessageBox.warning(self, "Invalid Selection", "No valid worksheet/layer selected.")
             return
 
-        # Extract data
         config = data["worksheet_data"]
         worksheet_name = config.get("worksheet_name")
         layer_name = data["layer_name"]
-        subfolder_type = data["subfolder_type"]  # "designs", "measurements", "construction"
+        subfolder_type = data["subfolder_type"]  # "designs" or "construction"
         full_layer_path = data["full_layer_path"]
+
+        # Worksheet root folder
+        worksheet_root = os.path.dirname(os.path.dirname(full_layer_path))
 
         if not os.path.exists(full_layer_path):
             QMessageBox.critical(self, "Path Error", f"Layer folder not found:\n{full_layer_path}")
             return
 
-        # Update application state
+        # Update state
         self.current_worksheet_name = worksheet_name
         self.current_project_name = config.get("project_name")
         self.current_worksheet_data = config
         self.current_layer_name = layer_name
+        self.current_subfolder_type = subfolder_type
 
-        # Update UI display (top banner)
         self.display_current_worksheet(config)
 
         dimension = config.get("dimension", "2D")
         category = config.get("worksheet_category", "None")
 
-        # Show correct dimension panels
         self.three_D_frame.setVisible(dimension == "3D")
         self.two_D_frame.setVisible(dimension == "2D")
 
-        # Show bottom section for Road/Bridge
-        self.bottom_section.setVisible(category in ["Road", "Bridge"])
-
-        # Reset everything first
         self.reset_all()
         self.clear_baseline_planes()
+        self.clear_reference_lines()          # Clear previous 2D lines
+        self.clear_reference_actors()         # Clear previous 3D actors
 
-        # === STEP 1: Load zero line ===
-        zero_loaded = self.load_zero_line_from_layer(full_layer_path)
+        # Load layer config file (different name for construction vs design)
+        config_filename = "Construction_Layer_config.txt" if subfolder_type == "construction" else "layer_config.txt"
+        layer_config_path = os.path.join(full_layer_path, config_filename)
+        layer_config = {}
+        if os.path.exists(layer_config_path):
+            try:
+                with open(layer_config_path, 'r', encoding='utf-8') as f:
+                    layer_config = json.load(f)
+            except Exception as e:
+                self.message_text.append(f"ERROR loading {config_filename}: {str(e)}")
 
-        if not zero_loaded:
-            QMessageBox.warning(self, "Zero Line Missing",
-                                "No zero_line_config.json found in the layer.\n"
-                                "Zero line is required for correct baseline mapping.\n"
-                                "You can set it manually later.")
+        # Referenced design layer (for construction layers)
+        referenced_design_layer = layer_config.get("reference_layer_2d") if subfolder_type == "construction" else None
+        design_layer_path = None
+        if referenced_design_layer:
+            design_layer_path = os.path.join(worksheet_root, "designs", referenced_design_layer)
 
-        # === STEP 2: Load all baselines ===
-        loaded_baselines = self.load_all_baselines_from_layer(full_layer_path)
+        zero_loaded = False
+        design_points_loaded = False
+        loaded_baselines = {}  # For 3D planes
 
-        # === STEP 3: Redraw baselines on 2D graph + check checkboxes ===
-        for ltype in loaded_baselines:
-            checkbox = {
-                'surface': self.surface_baseline,
-                'construction': self.construction_line,
-                'road_surface': self.road_surface_line,
-                'deck_line': self.deck_line,
-                'projection_line': self.projection_line,
-            }.get(ltype)
+        # ===============================================================
+        # DIFFERENT BEHAVIOR BASED ON SUBFOLDER TYPE
+        # ===============================================================
+        if subfolder_type == "designs":
+            self.add_material_line_button.setVisible(False)
+            # === DESIGN LAYER MODE ===
+            # Load ALL baselines from this design layer
+            loaded_baselines = self.load_all_baselines_from_layer(full_layer_path)
 
-            if checkbox:
-                checkbox.setChecked(True)
+            # Load ALL JSON points into 3D point cloud
+            design_points_loaded = self.load_json_files_to_3d_pointcloud(full_layer_path)
 
-            self.redraw_baseline_on_graph(ltype)
+            # Draw ALL baselines on 2D graph (solid lines)
+            for ltype in loaded_baselines.keys():
+                self.redraw_baseline_on_graph(ltype, style="solid")
 
-        # === STEP 4: Regenerate 3D planes ===
+            # Load zero line from this design layer
+            zero_loaded = self.load_zero_line_from_layer(full_layer_path)
+
+            self.message_text.append(f"Design layer mode: Loaded {len(loaded_baselines)} baselines (solid lines)")
+
+        elif subfolder_type == "construction":
+            # === CONSTRUCTION LAYER MODE ===
+            # Load only the REFERENCED baseline (dotted line)
+            referenced_baseline = layer_config.get("base_lines_reference")
+            dotted_line_drawn = False
+
+            if referenced_baseline:
+                # Try construction layer first
+                baseline_path = os.path.join(full_layer_path, referenced_baseline)
+                source = "construction layer"
+
+                # Fallback to design layer if not found
+                if not os.path.exists(baseline_path) and design_layer_path:
+                    baseline_path = os.path.join(design_layer_path, referenced_baseline)
+                    source = "design layer"
+
+                if os.path.exists(baseline_path):
+                    try:
+                        with open(baseline_path, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                        ltype = "construction"  # default type for reference
+                        polylines_2d = []
+                        for poly in data.get("polylines", []):
+                            poly_2d = [(pt["chainage_m"], pt["relative_elevation_m"]) for pt in poly["points"]]
+                            if len(poly_2d) >= 2:
+                                polylines_2d.append(poly_2d)
+                        self.line_types[ltype]['polylines'] = polylines_2d
+                        self.redraw_baseline_on_graph(ltype, style="dotted")
+                        dotted_line_drawn = True
+                        #self.message_text.append(f"Loaded dotted reference baseline: {referenced_baseline} from {source}")
+                    except Exception as e:
+                        self.message_text.append(f"Failed to load reference baseline: {e}")
+                else:
+                    self.message_text.append(f"Referenced baseline not found: {referenced_baseline}")
+
+            # Load 3D planes ONLY from the referenced design layer (if any)
+            if design_layer_path and os.path.exists(design_layer_path):
+                loaded_baselines = self.load_all_baselines_from_layer(design_layer_path)
+                design_points_loaded = self.load_json_files_to_3d_pointcloud(design_layer_path)
+                self.message_text.append(f"Construction mode: Loaded {len(loaded_baselines)} baselines from referenced design layer {referenced_design_layer}")
+
+            # Load zero line: prefer design layer, then current construction layer
+            if design_layer_path and os.path.exists(design_layer_path):
+                zero_loaded = self.load_zero_line_from_layer(design_layer_path)
+            if not zero_loaded:
+                zero_loaded = self.load_zero_line_from_layer(full_layer_path)
+
+        # ===============================================================
+        # Generate 3D planes if we have baselines and zero line
+        # ===============================================================
         if self.zero_line_set and loaded_baselines:
             last_width = 10.0
             if loaded_baselines:
                 first_ltype = list(loaded_baselines.keys())[0]
                 baseline_data = loaded_baselines[first_ltype]
                 last_width = baseline_data.get("width_meters", 10.0)
-
             self.last_plane_width = last_width
             self.map_baselines_to_3d_planes_from_data(loaded_baselines, last_width)
+            self.message_text.append(f"Generated 3D planes from {len(loaded_baselines)} baselines")
 
-        # === STEP 5: Make sure the 2D graph section is VISIBLE ===
+        # ===============================================================
+        # UI setup
+        # ===============================================================
         self.show_graph_section(category)
 
-        # === STEP 6: Show correct baseline containers ===
-        self.surface_container.setVisible(False)
-        self.construction_container.setVisible(False)
-        self.road_surface_container.setVisible(False)
-        self.zero_container.setVisible(False)
-        self.deck_line_container.setVisible(False)
-        self.projection_container.setVisible(False)
-        self.construction_dots_container.setVisible(False)
-        if hasattr(self, 'bridge_zero_container'):
-            self.bridge_zero_container.setVisible(False)
+        is_construction_layer = (subfolder_type == "construction")
+        if is_construction_layer:
+            self.switch_to_construction_mode()
+            self.zero_container.setVisible(False)
+            self.scale_section.setVisible(True)
+            self.message_text.append("Construction mode activated")
+        else:
+            self.surface_container.setVisible(category == "Road")
+            self.construction_container.setVisible(category == "Road")
+            self.road_surface_container.setVisible(category == "Road")
+            self.zero_container.setVisible(category in ["Road", "Bridge"])
+            self.preview_button.setVisible(True)
+            self.threed_map_button.setVisible(True)
+            self.save_button.setVisible(True)
 
-        if category == "Road":
-            self.surface_container.setVisible(True)
-            self.construction_container.setVisible(True)
-            self.road_surface_container.setVisible(True)
-            self.zero_container.setVisible(True)
-        elif category == "Bridge":
-            self.deck_line_container.setVisible(True)
-            self.projection_container.setVisible(True)
-            self.construction_dots_container.setVisible(True)
-            if hasattr(self, 'bridge_zero_container'):
-                self.bridge_zero_container.setVisible(True)
-
-        # Show action buttons
-        self.preview_button.setVisible(True)
-        self.threed_map_button.setVisible(True)
-        self.save_button.setVisible(True)
-
-        self.add_material_line_button.setVisible(False)
-
-        # Add layer to left panel
         self.add_layer_to_panel(layer_name, dimension)
 
-        # Auto-load point cloud if linked
+        # Load point cloud if linked
         pc_file = config.get("point_cloud_file")
         if pc_file and os.path.exists(pc_file):
             self.load_point_cloud_from_path(pc_file)
 
         # Final feedback
-        self.message_text.append(f"Successfully opened existing worksheet:")
+        self.message_text.append(f"Successfully opened worksheet:")
         self.message_text.append(f"   → Worksheet: {worksheet_name}")
         self.message_text.append(f"   → Section: {subfolder_type}")
         self.message_text.append(f"   → Layer: {layer_name}")
-        self.message_text.append(f"   → Baselines loaded: {len(loaded_baselines)} type(s)")
+        self.message_text.append(f"   → 2D graph: {'All baselines (solid)' if subfolder_type == 'designs' else 'Reference baseline (dotted)' if dotted_line_drawn else 'No reference baseline'}")
+        self.message_text.append(f"   → 3D planes: {len(loaded_baselines)} baselines {'from design layer' if subfolder_type == 'construction' else 'from this layer'}")
+        if referenced_design_layer:
+            self.message_text.append(f"   → Design ref: {referenced_design_layer} {'(loaded)' if design_points_loaded else '(not found)'}")
+        if subfolder_type == "construction" and referenced_baseline:
+            self.message_text.append(f"   → Baseline ref: {referenced_baseline} (dotted)")
         self.message_text.append(f"   → Zero line: {'Loaded' if zero_loaded else 'Not found'}")
-        self.message_text.append("   → 2D Graph section is now visible with all baselines.")
 
         QMessageBox.information(self, "Worksheet Opened",
                                 f"<b>{worksheet_name}</b><br><br>"
                                 f"Layer: <i>{layer_name}</i> ({subfolder_type})<br>"
-                                f"Baselines: {len(loaded_baselines)} type(s) loaded<br>"
-                                f"Zero Line: {'Yes' if zero_loaded else 'No'}<br><br>"
-                                f"2D cross-section graph is now visible with all drawn lines.")
+                                f"2D Graph: {'All baselines (solid)' if subfolder_type == 'designs' else 'Reference baseline (dotted)' if dotted_line_drawn else 'No reference baseline'}<br>"
+                                f"3D Planes: {len(loaded_baselines)} baselines loaded<br>"
+                                f"Zero Line: {'Yes' if zero_loaded else 'No'}<br>"
+                                f"Design ref: {referenced_design_layer or 'None'}<br>"
+                                f"Mode: {'Construction' if is_construction_layer else 'Design'}")
 
-        # Final refresh
         self.canvas.draw_idle()
         if hasattr(self, 'vtk_widget'):
             self.vtk_widget.GetRenderWindow().Render()
-
-# ===========================================================================================================================================================
-    def show_graph_section(self, category):
+# ==========================================================================================================================================================
+    def load_json_files_to_3d_pointcloud(self, folder_path):
         """
-        Ensures the 2D cross-section graph and baseline controls are fully visible
-        when opening an existing worksheet.
+        Load only JSON files that are intended to be point clouds (e.g., not baseline or config files).
         """
-        # 1. Show the entire bottom section (contains line section + graph)
-        if hasattr(self, 'bottom_section'):
-            self.bottom_section.setVisible(True)
+        import vtk
+        from vtk.util.numpy_support import numpy_to_vtk
 
-        # 2. Show the collapsible line section (checkboxes)
-        if hasattr(self, 'line_section'):
-            self.line_section.setVisible(True)
+        if not hasattr(self, 'vtk_widget') or not self.vtk_widget:
+            self.message_text.append("Error: VTK widget not initialized.")
+            return False
 
-        # 3. Expand the line section if it's collapsed
-        if hasattr(self, 'line_content_widget') and not self.line_content_widget.isVisible():
-            self.line_content_widget.show()
-            self.collapse_button.setText("◀")
-            self.collapse_button.setToolTip("Close Line Section")
-            self.undo_button.show()
-            self.redo_button.show()
-            self.line_section.setMaximumWidth(350)
-            self.line_section.setFixedWidth(350)
+        renderer = self.vtk_widget.GetRenderWindow().GetRenderers().GetFirstRenderer()
+        if not renderer:
+            self.message_text.append("Error: No renderer found in VTK widget.")
+            return False
 
-        # 4. Show scale section (chainage slider + scale bar)
-        if hasattr(self, 'scale_section'):
-            self.scale_section.setVisible(True)
+        loaded_any = False
 
-        # 5. Show relevant baseline containers based on category
-        if category == "Road":
-            self.surface_container.setVisible(True)
-            self.construction_container.setVisible(True)
-            self.road_surface_container.setVisible(True)
-            self.zero_container.setVisible(True)
-        elif category == "Bridge":
-            self.deck_line_container.setVisible(True)
-            self.projection_container.setVisible(True)
-            self.construction_dots_container.setVisible(True)
-            if hasattr(self, 'bridge_zero_container'):
-                self.bridge_zero_container.setVisible(True)
+        # Define files to SKIP (baseline, config, zero line, etc.)
+        skip_patterns = [
+            "_baseline.json",
+            "zero_line_config.json",
+            "layer_config.txt",
+            "Construction_Layer_config.txt",
+            "worksheet_config.txt"
+        ]
 
-        # 6. Show action buttons
-        self.preview_button.setVisible(True)
-        self.threed_map_button.setVisible(True)
-        self.save_button.setVisible(True)
+        for filename in os.listdir(folder_path):
+            if not filename.lower().endswith('.json'):
+                continue
 
-        # 7. Force redraw of matplotlib canvas
-        if hasattr(self, 'canvas'):
+            # Skip known non-point-cloud JSON files
+            if any(pattern in filename.lower() for pattern in skip_patterns):
+                continue  # Silently skip - no warning needed
+
+            file_path = os.path.join(folder_path, filename)
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                points_list = data.get("points", [])
+                if not points_list:
+                    # Optional: log only if you want to debug unexpected files
+                    # self.message_text.append(f"No 'points' key found in {filename} (skipped)")
+                    continue
+
+                # Convert list of [x,y,z] to numpy array
+                points_array = np.array(points_list, dtype=np.float32)
+
+                # Create VTK points
+                vtk_points = vtk.vtkPoints()
+                vtk_points.SetNumberOfPoints(len(points_array))
+
+                for i, pt in enumerate(points_array):
+                    vtk_points.SetPoint(i, pt[0], pt[1], pt[2])
+
+                # Create polydata
+                polydata = vtk.vtkPolyData()
+                polydata.SetPoints(vtk_points)
+
+                # Create vertex glyph for points
+                vertex_filter = vtk.vtkVertexGlyphFilter()
+                vertex_filter.SetInputData(polydata)
+
+                # Mapper
+                mapper = vtk.vtkPolyDataMapper()
+                mapper.SetInputConnection(vertex_filter.GetOutputPort())
+
+                # Actor
+                actor = vtk.vtkActor()
+                actor.SetMapper(mapper)
+                actor.GetProperty().SetPointSize(3.0)
+                actor.GetProperty().SetColor(0.8, 0.2, 0.2)  # red points
+
+                actor.SetUserData({"source": f"PointCloud_{filename}"})
+
+                renderer.AddActor(actor)
+                loaded_any = True
+
+                self.message_text.append(f"Loaded {len(points_array)} points from point cloud file: {filename}")
+
+            except Exception as e:
+                self.message_text.append(f"Failed to load {filename} as point cloud: {str(e)}")
+
+        if loaded_any:
+            self.vtk_widget.GetRenderWindow().Render()
+
+        return loaded_any
+# ==========================================================================================================================================================
+
+    def clear_reference_lines(self):
+        """Remove all reference lines from 2D graph"""
+        if hasattr(self, 'reference_lines'):
+            for line in self.reference_lines.values():
+                line.remove()
+            self.reference_lines.clear()
             self.canvas.draw_idle()
 
-        # 8. Force layout update
-        QApplication.processEvents()
+    def clear_reference_actors(self):
+        """Remove all reference actors from 3D VTK view"""
+        if not hasattr(self, 'vtk_widget') or not self.vtk_widget:
+            return
+        renderer = self.vtk_widget.GetRenderWindow().GetRenderers().GetFirstRenderer()
+        if renderer:
+            actors = renderer.GetActors()
+            for actor in actors:
+                if actor.GetUserData() and "source" in actor.GetUserData():
+                    renderer.RemoveActor(actor)
+            self.vtk_widget.GetRenderWindow().Render()
+
     
 # ===========================================================================================================================================================
+
     def load_zero_line_from_layer(self, layer_path):
-        """Load zero_line_config.json from the given layer folder"""
+        """Load zero_line_config.json from the given layer folder and fully update scale/graph"""
         json_path = os.path.join(layer_path, "zero_line_config.json")
+
         if not os.path.exists(json_path):
+            self.message_text.append(f"Zero line config not found: {json_path}")
             return False
 
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
 
-            self.zero_start_point = np.array(config["point1"]["coordinates"])
-            self.zero_end_point = np.array(config["point2"]["coordinates"])
-            self.zero_start_z = config["reference_elevation_z"]
-            self.total_distance = config["total_length_m"]
-            self.original_total_distance = self.total_distance
-            self.zero_interval = config.get("interval_m", 20.0)
-            self.zero_start_km = config["point1"].get("km")
-            self.zero_end_km = config["point2"].get("km")
+            # Debug: Show loaded keys
+            self.message_text.append(f"Zero line config keys: {list(config.keys())}")
 
-            self.zero_line_set = True
+            # Extract values
+            self.zero_start_point = np.array(config.get("point1", {}).get("coordinates", [0, 0, 0]))
+            self.zero_end_point   = np.array(config.get("point2", {}).get("coordinates", [0, 0, 0]))
+            self.zero_start_z     = config.get("reference_elevation_z", self.zero_start_point[2])
+            self.total_distance   = config.get("total_length_m", 100.0)
+            self.original_total_distance = self.total_distance
+            self.zero_interval    = config.get("interval_m", 20.0)
+            self.zero_start_km    = config.get("point1", {}).get("km")
+            self.zero_end_km      = config.get("point2", {}).get("km")
+
+            self.zero_line_set = config.get("zero_line_set", True)
 
             # Redraw zero line on graph
             if hasattr(self, 'zero_graph_line') and self.zero_graph_line:
                 self.zero_graph_line.remove()
-            self.zero_graph_line, = self.ax.plot([0, self.total_distance], [0, 0],
-                                                color='purple', linewidth=3)
+            self.zero_graph_line, = self.ax.plot(
+                [0, self.total_distance], [0, 0],
+                color='purple', linewidth=3, label='Zero Line'
+            )
 
-            # Update ticks and scale
+            # Update chainage ticks and scale
             self.update_chainage_ticks()
+
+            # Show scale section
             if hasattr(self, 'scale_section'):
                 self.scale_section.setVisible(True)
 
+            # Update legend and redraw graph
+            self.ax.legend()
+            self.canvas.draw_idle()
+
+            # Optional: Redraw zero line in 3D if implemented
+            if hasattr(self, 'draw_zero_line_in_3d'):
+                self.draw_zero_line_in_3d()
+
+            self.message_text.append(f"Zero line loaded and graph updated from: {json_path}")
+            self.message_text.append(f"  → Start KM: {self.zero_start_km}")
+            self.message_text.append(f"  → Length: {self.total_distance:.2f} m")
+            self.message_text.append(f"  → Interval: {self.zero_interval:.1f} m")
+
             return True
+
         except Exception as e:
-            self.message_text.append(f"Error loading zero line config: {str(e)}")
+            self.message_text.append(f"Error loading zero_line_config.json: {str(e)}")
             return False
 
+
 # ===========================================================================================================================================================
+
     def load_all_baselines_from_layer(self, layer_path):
-        """Load all *_baseline.json files from layer folder and return dict of loaded data"""
+        """Load all *_baseline.json files from the given layer folder.
+        Returns dict of loaded data.
+        Does NOT draw on 2D graph — only stores data for 3D planes.
+        """
         loaded = {}
         possible_files = [
             "surface_baseline.json",
@@ -1555,34 +1699,45 @@ class PointCloudViewer(ApplicationUI):
                 ltype = key_map[filename]
                 loaded[ltype] = data
 
-                # Store polylines in memory
+                # Store polylines in memory (for 3D planes only)
                 polylines_2d = []
                 for poly in data.get("polylines", []):
-                    poly_2d = []
-                    for pt in poly["points"]:
-                        poly_2d.append((pt["chainage_m"], pt["relative_elevation_m"]))
+                    poly_2d = [(pt["chainage_m"], pt["relative_elevation_m"]) for pt in poly["points"]]
                     if len(poly_2d) >= 2:
                         polylines_2d.append(poly_2d)
 
                 self.line_types[ltype]['polylines'] = polylines_2d
+
+                # IMPORTANT: Do NOT redraw on graph here!
 
             except Exception as e:
                 self.message_text.append(f"Error loading {filename}: {str(e)}")
 
         return loaded
 
-# ===========================================================================================================================================================
-    def redraw_baseline_on_graph(self, ltype):
-        """Redraw a loaded baseline on the 2D matplotlib graph"""
+# ============================================================================================================================================================
+    def redraw_baseline_on_graph(self, ltype, style="solid"):
+        """Redraw a loaded baseline on the 2D matplotlib graph.
+        Supports 'solid' or 'dotted' style.
+        """
         color = self.line_types[ltype]['color']
+        linestyle = '--' if style == "dotted" else '-'
+
         for poly_2d in self.line_types[ltype]['polylines']:
             if len(poly_2d) < 2:
                 continue
             xs = [p[0] for p in poly_2d]
             ys = [p[1] for p in poly_2d]
-            line, = self.ax.plot(xs, ys, color=color, linewidth=2.5)
+            line, = self.ax.plot(
+                xs, ys,
+                color=color,
+                linewidth=2.5,
+                linestyle=linestyle,
+                label=f"{ltype.capitalize()} ({style})"
+            )
             self.line_types[ltype]['artists'].append(line)
 
+        self.ax.legend()
         self.canvas.draw_idle()
 
 # ===========================================================================================================================================================
@@ -1660,6 +1815,60 @@ class PointCloudViewer(ApplicationUI):
                     self.baseline_plane_actors.append(actor)
 
         self.vtk_widget.GetRenderWindow().Render()
+
+
+# ===========================================================================================================================================================
+    def show_graph_section(self, category):
+        """
+        Ensures the 2D cross-section graph and baseline controls are fully visible
+        when opening an existing worksheet.
+        """
+        # 1. Show the entire bottom section (contains line section + graph)
+        if hasattr(self, 'bottom_section'):
+            self.bottom_section.setVisible(True)
+
+        # 2. Show the collapsible line section (checkboxes)
+        if hasattr(self, 'line_section'):
+            self.line_section.setVisible(True)
+
+        # 3. Expand the line section if it's collapsed
+        if hasattr(self, 'line_content_widget') and not self.line_content_widget.isVisible():
+            self.line_content_widget.show()
+            self.collapse_button.setText("◀")
+            self.collapse_button.setToolTip("Close Line Section")
+            self.undo_button.show()
+            self.redo_button.show()
+            self.line_section.setMaximumWidth(350)
+            self.line_section.setFixedWidth(350)
+
+        # 4. Show scale section (chainage slider + scale bar)
+        if hasattr(self, 'scale_section'):
+            self.scale_section.setVisible(True)
+
+        # 5. Show relevant baseline containers based on category
+        if category == "Road":
+            self.surface_container.setVisible(True)
+            self.construction_container.setVisible(True)
+            self.road_surface_container.setVisible(True)
+            self.zero_container.setVisible(True)
+        elif category == "Bridge":
+            self.deck_line_container.setVisible(True)
+            self.projection_container.setVisible(True)
+            self.construction_dots_container.setVisible(True)
+            if hasattr(self, 'bridge_zero_container'):
+                self.bridge_zero_container.setVisible(True)
+
+        # 6. Show action buttons
+        self.preview_button.setVisible(True)
+        self.threed_map_button.setVisible(True)
+        self.save_button.setVisible(True)
+
+        # 7. Force redraw of matplotlib canvas
+        if hasattr(self, 'canvas'):
+            self.canvas.draw_idle()
+
+        # 8. Force layout update
+        QApplication.processEvents()
 # =======================================================================================================================================
     def load_point_cloud_files(self, file_list):
         """Load multiple point cloud files (merge or first one) - currently loads first file with progress bar"""
@@ -4446,7 +4655,9 @@ class PointCloudViewer(ApplicationUI):
             # Clear the lists
             self.line_types[line_type]['artists'] = []
             self.line_types[line_type]['polylines'] = []
-        
+
+
+# --------------------------------------------------------------------        
         # Clear all_graph_lines
         for lt, points, artist, ann in self.all_graph_lines:
             try:
@@ -4579,6 +4790,8 @@ class PointCloudViewer(ApplicationUI):
         # Redraw canvas
         self.canvas.draw()
         self.figure.tight_layout()
+
+        self.clear_baseline_planes()
         
         # Also reset 3D measurements if needed
         self.message_text.append("All graph lines have been reset")
@@ -4928,7 +5141,7 @@ class PointCloudViewer(ApplicationUI):
         if hasattr(self, 'vtk_widget'):
             self.vtk_widget.GetRenderWindow().Render()
 
-# ================================================================================================================================
+# ============================================================================================================================================================
 
     def changeEvent(self, event):
         super(PointCloudViewer, self).changeEvent(event)

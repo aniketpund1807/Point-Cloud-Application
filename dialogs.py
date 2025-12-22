@@ -862,26 +862,26 @@ class MaterialLineDialog(QDialog):
         
         # Initial Filling thickness
         initial_layout = QHBoxLayout()
-        initial_label = QLabel("Initial Filling thickness (mm):")
+        initial_label = QLabel("Initial Filling thickness (m):")
         initial_label.setFixedWidth(200)
         self.initial_spin = QDoubleSpinBox()
         self.initial_spin.setRange(0.0, 1000.0)
         self.initial_spin.setValue(0.0)
         self.initial_spin.setSingleStep(1.0)
-        self.initial_spin.setSuffix(" mm")
+        self.initial_spin.setSuffix(" m")
         initial_layout.addWidget(initial_label)
         initial_layout.addWidget(self.initial_spin, 1)
         layout.addLayout(initial_layout)
         
         # Final Compressed thickness
         final_layout = QHBoxLayout()
-        final_label = QLabel("Final Compressed thickness (mm):")
+        final_label = QLabel("Final Compressed thickness (m):")
         final_label.setFixedWidth(200)
         self.final_spin = QDoubleSpinBox()
         self.final_spin.setRange(0.0, 1000.0)
         self.final_spin.setValue(0.0)
         self.final_spin.setSingleStep(1.0)
-        self.final_spin.setSuffix(" mm")
+        self.final_spin.setSuffix(" m")
         final_layout.addWidget(final_label)
         final_layout.addWidget(self.final_spin, 1)
         layout.addLayout(final_layout)
@@ -976,6 +976,7 @@ class MaterialLineDialog(QDialog):
             'initial_filling': self.initial_spin.value(),
             'final_compressed': self.final_spin.value()
         }
+    
 # ==========================================================================================================================================
 #                                                    ** MEASUREMENT DIALOG **
 # ==========================================================================================================================================
@@ -2480,6 +2481,8 @@ class ExistingWorksheetDialog(QDialog):
             "layer_name": self.selected_layer_name,
             "full_layer_path": full_path
         }
+    
+    
 # =================================================================================================================================================================
 #                                                   ** Updated WorksheetNewDialog (Layer Name - No Fallback) **
 # =================================================================================================================================================================
