@@ -21,8 +21,6 @@ from vtkmodules.vtkRenderingCore import (vtkActor, vtkPolyDataMapper)
 
 from vtkmodules.vtkFiltersSources import vtkPlaneSource
 
-# from vtk.util.numpy_support import numpy_to_vtk
-
 
 from datetime import datetime
 from math import sqrt, degrees
@@ -31,7 +29,7 @@ from utils import find_best_fitting_plane
 from application_ui import ApplicationUI
 from dialogs import (ConstructionConfigDialog, CurveDialog, ZeroLineDialog, MaterialLineDialog, MeasurementDialog,
                     DesignNewDialog, WorksheetNewDialog, HelpDialog, ConstructionNewDialog, CreateProjectDialog, ExistingWorksheetDialog,
-                    RoadPlaneWidthDialog)
+                    RoadPlaneWidthDialog, MaterialSegmentDialog)
 
 # =============================================================================================================================================
 #                                                        ** CLASS POINTCLOUDVIEWER **
@@ -74,6 +72,14 @@ class PointCloudViewer(ApplicationUI):
 
         self.material_line_widgets = []
 
+        self.material_drawing_points = []          # current points being drawn
+        self.current_material_line_artist = None   # temporary line preview
+        self.material_polylines = {}               # dict: material_idx -> list of finished polylines # Current session labels for material
+
+        self.material_polylines_artists = {}  # {material_idx: [artist1, artist2, ...]}
+        self.current_material_line_artist = None  # Only for temporary preview
+        self.material_drawing_points = []
+
         # NEW: Unified plane support for ALL baselines
         self.baseline_plane_actors = []     # Stores all plane actors (individual + combined)
         self.plane_colors = {               # Distinct semi-transparent colors for each type
@@ -105,7 +111,11 @@ class PointCloudViewer(ApplicationUI):
         self.end_point = np.array([387219.37847222225, 2060516.8861111111, 612.2502197265625])
         self.total_distance = np.sqrt((self.end_point[0] - self.start_point[0])**2 + (self.end_point[1] - self.start_point[1])**2)
         self.original_total_distance = self.total_distance
-        
+
+        # Ensure canvas can receive key events
+        self.canvas.setFocusPolicy(Qt.StrongFocus)
+        self.canvas.setFocus()  # Optional: give focus automatically
+
         # Connect signals
         self.connect_signals()
 
@@ -1052,23 +1062,59 @@ class PointCloudViewer(ApplicationUI):
         self.canvas.draw_idle()
 
 # =======================================================================================================================================
-# OPEN MATERIAL LINE DIALOG WHEN "Construction → New" IS CLICKED
+
     def open_material_line_dialog(self):
-        """Opens the Material Line Configuration Dialog to add a new line"""
-        dialog = MaterialLineDialog(parent=self)
+        """Opens the Material Line Configuration Dialog to add a new material line"""
+        # Ensure we have a current worksheet
+        if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
+            QMessageBox.warning(self, "No Worksheet", "Please create or open a worksheet first.")
+            return
+
+        # CRITICAL: Use the stored construction layer path from when it was created
+        if not hasattr(self, 'construction_layer_info') or not self.construction_layer_info:
+            QMessageBox.warning(self, "No Construction Layer", 
+                              "Please create a construction layer first (Construction → New).")
+            return
+
+        current_construction_path = self.construction_layer_info.get('folder')
+        if not current_construction_path or not os.path.exists(current_construction_path):
+            QMessageBox.critical(self, "Path Error", 
+                               f"Construction layer folder not found:\n{current_construction_path}")
+            return
+
+        # Store this path for MaterialLineDialog and other uses
+        self.current_construction_layer_path = current_construction_path
+
+        # Open the dialog with correct path
+        dialog = MaterialLineDialog(
+            construction_layer_path=current_construction_path,
+            parent=self
+        )
+
         if dialog.exec_() == QDialog.Accepted:
-            config = dialog.get_material_data()
-            
-            # Add visibility flag
-            config['visible'] = True
-            
-            # Store config
+            material_data = dialog.get_material_data()
+
+            folder_name = material_data['name'].strip()
+
+            # Full path to material folder
+            material_folder_full_path = os.path.join(current_construction_path, folder_name)
+
+            config = {
+                'name': material_data['name'],
+                'folder_name': folder_name,
+                'material_type': material_data['material_type'],
+                'from_another': material_data['from_another'],
+                'ref_layer': material_data['ref_layer'],
+                'ref_line': material_data['ref_line'],
+                'initial_filling_mm': material_data['initial_filling'],
+                'final_compressed_mm': material_data['final_compressed'],
+                'visible': True,
+                'path': material_folder_full_path
+            }
+
             self.material_configs.append(config)
-            
-            # Create UI entry for the material line
             self.create_material_line_entry(config)
-            
-            # If this is the first material line, change button color to orange
+
             if len(self.material_configs) == 1:
                 self.add_material_line_button.setStyleSheet("""
                     QPushButton {
@@ -1079,18 +1125,16 @@ class PointCloudViewer(ApplicationUI):
                         border-radius: 5px;
                         font-weight: bold;
                     }
-                    QPushButton:hover {
-                        background-color: #FF8C00;
-                    }
-                    QPushButton:pressed {
-                        background-color: #FF7F00;
-                    }
+                    QPushButton:hover { background-color: #FF8C00; }
+                    QPushButton:pressed { background-color: #FF7F00; }
                 """)
-            
+
             self.message_text.append("Material Line Created Successfully!")
             self.message_text.append(f"Name: {config['name']}")
-            self.message_text.append(f"Initial Thickness: {config['initial_filling']} mm")
-            self.message_text.append(f"Final Thickness: {config['final_compressed']} mm")
+            self.message_text.append(f"Folder: {folder_name}")
+            self.message_text.append(f"Reference: {'Baseline: ' + config['ref_layer'] if config['from_another'] else 'Material Line: ' + config['ref_line']}")
+            self.message_text.append("")
+
         else:
             self.message_text.append("Material Line creation cancelled.")
 
@@ -1113,21 +1157,25 @@ class PointCloudViewer(ApplicationUI):
         container.setFixedWidth(250)
         container.setStyleSheet("""
             QWidget {
-                background-color: #FFA500;  /* Orange background */
+                background-color: #FFA500; /* Orange background */
                 border: 1px solid #FF8C00;
                 border-radius: 5px;
                 margin: 3px;
                 padding: 5px;
             }
         """)
-        
+
         layout = QHBoxLayout(container)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
-        
-        # Checkbox for visibility/selection
+
+        # Checkbox for visibility/selection - START UNCHECKED for NEW items
         checkbox = QCheckBox()
-        checkbox.setChecked(material_data.get('visible', True))
+        # Only use the provided 'visible' value when editing an existing entry
+        # For new entries (edit_index is None), force it to False
+        is_visible = material_data.get('visible', False) if edit_index is not None else False
+        checkbox.setChecked(is_visible)
+
         checkbox.setStyleSheet("""
             QCheckBox {
                 background-color: transparent;
@@ -1138,11 +1186,17 @@ class PointCloudViewer(ApplicationUI):
                 height: 16px;
             }
         """)
-        
+
+        # Get index for lambda (before append)
+        current_index = len(self.material_items) if edit_index is None else edit_index
+
         # Connect checkbox to toggle visibility
-        checkbox.stateChanged.connect(lambda state, idx=len(self.material_items) if edit_index is None else edit_index: 
-                                    self.toggle_material_line_visibility(idx, state))
-        
+        checkbox.stateChanged.connect(lambda state: self.toggle_material_line_visibility(current_index, state))
+
+        # Manual trigger if already checked (important: stateChanged doesn't fire on init)
+        if checkbox.isChecked():
+            self.toggle_material_line_visibility(current_index, Qt.Checked)
+
         # Material label
         material_label = QLabel(material_data['name'])
         material_label.setStyleSheet("""
@@ -1155,7 +1209,7 @@ class PointCloudViewer(ApplicationUI):
                 color: #000000;
             }
         """)
-        
+
         # Pencil button for editing
         pencil_button = QPushButton()
         svg_data = QByteArray()
@@ -1186,21 +1240,20 @@ class PointCloudViewer(ApplicationUI):
             }
         """)
         pencil_button.setCursor(Qt.PointingHandCursor)
-        pencil_button.clicked.connect(lambda checked, idx=len(self.material_items) if edit_index is None else edit_index: 
-                                    self.edit_existing_material_line(idx))
-        
+        pencil_button.clicked.connect(lambda checked: self.edit_existing_material_line(current_index))
+
         # Add widgets to layout
         layout.addWidget(checkbox)
         layout.addWidget(material_label, 1)
         layout.addWidget(pencil_button)
-        
+
         if edit_index is not None:
             # Replace existing item
             if edit_index < len(self.material_items):
                 old_container = self.material_items[edit_index]['container']
                 old_container.setParent(None)
                 old_container.deleteLater()
-                
+
                 self.material_items[edit_index] = {
                     'container': container,
                     'checkbox': checkbox,
@@ -1208,7 +1261,7 @@ class PointCloudViewer(ApplicationUI):
                     'pencil_button': pencil_button,
                     'data': material_data
                 }
-                
+
                 # Re-insert at correct position
                 self.material_items_layout.insertWidget(edit_index, container)
         else:
@@ -1222,7 +1275,7 @@ class PointCloudViewer(ApplicationUI):
             }
             self.material_items.append(new_item)
             self.material_items_layout.addWidget(container)
-        
+
         # Message for new items only
         if edit_index is None:
             self.message_text.append(f"Added material line: {material_data['name']}")
@@ -1252,40 +1305,54 @@ class PointCloudViewer(ApplicationUI):
             
             self.message_text.append(f"Updated material line: {new_material_data['name']}")
 
-# ====================================================================================================================================
-    def toggle_material_line_visibility(self, index, state):
-        """Toggle visibility of a material line"""
-        if 0 <= index < len(self.material_items):
-            item = self.material_items[index]
-            is_visible = state == Qt.Checked
-            item['data']['visible'] = is_visible
-            if index < len(self.material_configs):
-                self.material_configs[index]['visible'] = is_visible
-            
-            if is_visible:
-                self.message_text.append(f"Showing material line: {item['data']['name']}")
-            else:
-                self.message_text.append(f"Hiding material line: {item['data']['name']}")
 
 # =======================================================================================================================================
     def save_material_data(self):
-        """Save all material lines"""
-        if hasattr(self, 'material_items') and self.material_items:
-            self.message_text.append("<b>Material lines saved successfully!</b>")
-            self.message_text.append(f"Total: {len(self.material_items)} material line(s)\n")
-            for i, item in enumerate(self.material_items):
-                data = item['data']
-                visibility = "Visible" if data.get('visible', True) else "Hidden"
-                self.message_text.append(f"<b>{i+1}. {data['name']}</b> [{visibility}]")
-                self.message_text.append(f"   • Initial Thickness: {data['initial_filling']} mm")
-                self.message_text.append(f"   • Final Thickness: {data['final_compressed']} mm")
-                ref = data.get('ref_layer') or data.get('ref_line') or 'None'
-                self.message_text.append(f"   • Reference: {ref}")
-                if data.get('description'):
-                    self.message_text.append(f"   • Description: {data['description']}")
-                self.message_text.append("")
-        else:
+        """Save all material lines including dot configurations to JSON file"""
+        if not hasattr(self, 'material_configs') or not self.material_configs:
             self.message_text.append("No material lines to save.")
+            return
+
+        save_path = self.get_current_design_layer_path()
+        if not save_path:
+            return
+
+        materials_data = []
+        for i, config in enumerate(self.material_configs):
+            data = config.copy()
+            data['index'] = i
+
+            # Add dots for this material
+            material_dots = [d for d in self.material_dots if d['material_index'] == i]
+            dots_info = []
+            for dot in material_dots:
+                dot_info = {
+                    'point_number': dot['point_number'],
+                    'chainage_m': dot['x'],
+                    'elevation_m': dot['y'],
+                    'config': dot['config']
+                }
+                if self.zero_start_km is not None:
+                    interval_number = int(dot['x'] / self.zero_interval) if self.zero_interval > 0 else 0
+                    interval_value = interval_number * self.zero_interval
+                    chainage_label = f"{self.zero_start_km}+{interval_value:03d}"
+                    if self.zero_interval > 0 and abs(dot['x'] - interval_value) > 0.01:
+                        chainage_label += f" (approx {dot['x']:.2f}m)"
+                    dot_info['chainage_label'] = chainage_label
+                dots_info.append(dot_info)
+
+            data['dots'] = dots_info
+            data['num_dots'] = len(dots_info)
+            materials_data.append(data)
+
+        json_path = os.path.join(save_path, "material_lines.json")
+        try:
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(materials_data, f, indent=4, ensure_ascii=False)
+            self.message_text.append(f"Material lines saved to: {json_path}")
+        except Exception as e:
+            self.message_text.append(f"Error saving material_lines.json: {str(e)}")
+
 
 # ===========================================================================================================================================================
     def open_existing_worksheet(self):
@@ -1331,8 +1398,8 @@ class PointCloudViewer(ApplicationUI):
         self.clear_reference_lines()          # Clear previous 2D lines
         self.clear_reference_actors()         # Clear previous 3D actors
 
-        # Load layer config file (different name for construction vs design)
-        config_filename = "Construction_Layer_config.txt" if subfolder_type == "construction" else "layer_config.txt"
+        # Load layer config file
+        config_filename = "Construction_Layer_config.txt" if subfolder_type == "construction" else "design_layer_config.txt"
         layer_config_path = os.path.join(full_layer_path, config_filename)
         layer_config = {}
         if os.path.exists(layer_config_path):
@@ -1347,6 +1414,7 @@ class PointCloudViewer(ApplicationUI):
         design_layer_path = None
         if referenced_design_layer:
             design_layer_path = os.path.join(worksheet_root, "designs", referenced_design_layer)
+            design_layer_path = os.path.normpath(design_layer_path)
 
         zero_loaded = False
         design_points_loaded = False
@@ -1358,80 +1426,112 @@ class PointCloudViewer(ApplicationUI):
         if subfolder_type == "designs":
             self.add_material_line_button.setVisible(False)
             # === DESIGN LAYER MODE ===
-            # Load ALL baselines from this design layer
             loaded_baselines = self.load_all_baselines_from_layer(full_layer_path)
-
-            # Load ALL JSON points into 3D point cloud
             design_points_loaded = self.load_json_files_to_3d_pointcloud(full_layer_path)
 
-            # Draw ALL baselines on 2D graph (solid lines)
             for ltype in loaded_baselines.keys():
                 self.redraw_baseline_on_graph(ltype, style="solid")
 
-            # Load zero line from this design layer
             zero_loaded = self.load_zero_line_from_layer(full_layer_path)
 
-            self.message_text.append(f"Design layer mode: Loaded {len(loaded_baselines)} baselines (solid lines)")
+            self.message_text.append(f"Design layer loaded: {len(loaded_baselines)} baselines (solid lines)")
 
         elif subfolder_type == "construction":
             # === CONSTRUCTION LAYER MODE ===
-            # Load only the REFERENCED baseline (dotted line)
-            referenced_baseline = layer_config.get("base_lines_reference")
-            dotted_line_drawn = False
+            referenced_baselines = layer_config.get("base_lines_reference", [])
+            if isinstance(referenced_baselines, str):
+                referenced_baselines = [referenced_baselines]  # Backward compatibility
 
-            if referenced_baseline:
+            dotted_lines_drawn = 0
+
+            for baseline_filename in referenced_baselines:
+                if not baseline_filename:
+                    continue
+
                 # Try construction layer first
-                baseline_path = os.path.join(full_layer_path, referenced_baseline)
+                baseline_path = os.path.join(full_layer_path, baseline_filename)
                 source = "construction layer"
 
-                # Fallback to design layer if not found
-                if not os.path.exists(baseline_path) and design_layer_path:
-                    baseline_path = os.path.join(design_layer_path, referenced_baseline)
-                    source = "design layer"
+                # Fallback to referenced design layer
+                if not os.path.exists(baseline_path) and design_layer_path and os.path.exists(design_layer_path):
+                    baseline_path = os.path.join(design_layer_path, baseline_filename)
+                    source = "referenced design layer"
 
                 if os.path.exists(baseline_path):
                     try:
                         with open(baseline_path, 'r', encoding='utf-8') as f:
                             data = json.load(f)
-                        ltype = "construction"  # default type for reference
+
+                        ltype = data.get("baseline_key", "construction")
+                        color = data.get("color", "gray")
+
                         polylines_2d = []
                         for poly in data.get("polylines", []):
-                            poly_2d = [(pt["chainage_m"], pt["relative_elevation_m"]) for pt in poly["points"]]
+                            poly_2d = [(pt["chainage_m"], pt["relative_elevation_m"]) for pt in poly.get("points", [])]
                             if len(poly_2d) >= 2:
                                 polylines_2d.append(poly_2d)
-                        self.line_types[ltype]['polylines'] = polylines_2d
-                        self.redraw_baseline_on_graph(ltype, style="dotted")
-                        dotted_line_drawn = True
-                        #self.message_text.append(f"Loaded dotted reference baseline: {referenced_baseline} from {source}")
-                    except Exception as e:
-                        self.message_text.append(f"Failed to load reference baseline: {e}")
-                else:
-                    self.message_text.append(f"Referenced baseline not found: {referenced_baseline}")
 
-            # Load 3D planes ONLY from the referenced design layer (if any)
+                        if ltype not in self.line_types:
+                            self.line_types[ltype] = {'color': color, 'polylines': [], 'artists': []}
+
+                        # Clear old artists
+                        for artist in self.line_types[ltype]['artists']:
+                            try:
+                                artist.remove()
+                            except:
+                                pass
+                        self.line_types[ltype]['artists'].clear()
+                        self.line_types[ltype]['polylines'] = polylines_2d
+
+                        # Draw dotted line
+                        all_x, all_y = [], []
+                        for poly in polylines_2d:
+                            xs, ys = zip(*poly)
+                            all_x.extend(xs)
+                            all_y.extend(ys)
+
+                        if all_x:
+                            artist, = self.ax.plot(
+                                all_x, all_y,
+                                color=color,
+                                linestyle=':',
+                                linewidth=3,
+                                alpha=0.8,
+                                zorder=5
+                            )
+                            self.line_types[ltype]['artists'].append(artist)
+                            dotted_lines_drawn += 1
+
+                        self.message_text.append(f"Loaded reference baseline: {baseline_filename} ({source})")
+
+                    except Exception as e:
+                        self.message_text.append(f"Failed to load {baseline_filename}: {str(e)}")
+                else:
+                    self.message_text.append(f"Referenced baseline not found: {baseline_filename}")
+
+            # Load 3D planes from referenced design layer
             if design_layer_path and os.path.exists(design_layer_path):
                 loaded_baselines = self.load_all_baselines_from_layer(design_layer_path)
                 design_points_loaded = self.load_json_files_to_3d_pointcloud(design_layer_path)
-                self.message_text.append(f"Construction mode: Loaded {len(loaded_baselines)} baselines from referenced design layer {referenced_design_layer}")
+                self.message_text.append(f"Loaded {len(loaded_baselines)} baselines for 3D planes from design layer")
 
-            # Load zero line: prefer design layer, then current construction layer
+            # Load zero line: prefer design layer → then construction layer
             if design_layer_path and os.path.exists(design_layer_path):
                 zero_loaded = self.load_zero_line_from_layer(design_layer_path)
             if not zero_loaded:
                 zero_loaded = self.load_zero_line_from_layer(full_layer_path)
 
         # ===============================================================
-        # Generate 3D planes if we have baselines and zero line
+        # Generate 3D planes
         # ===============================================================
         if self.zero_line_set and loaded_baselines:
             last_width = 10.0
             if loaded_baselines:
-                first_ltype = list(loaded_baselines.keys())[0]
-                baseline_data = loaded_baselines[first_ltype]
-                last_width = baseline_data.get("width_meters", 10.0)
+                first_key = next(iter(loaded_baselines))
+                last_width = loaded_baselines[first_key].get("width_meters", 10.0)
             self.last_plane_width = last_width
             self.map_baselines_to_3d_planes_from_data(loaded_baselines, last_width)
-            self.message_text.append(f"Generated 3D planes from {len(loaded_baselines)} baselines")
+            self.message_text.append(f"Generated 3D planes (width: {last_width:.2f}m)")
 
         # ===============================================================
         # UI setup
@@ -1443,7 +1543,18 @@ class PointCloudViewer(ApplicationUI):
             self.switch_to_construction_mode()
             self.zero_container.setVisible(False)
             self.scale_section.setVisible(True)
-            self.message_text.append("Construction mode activated")
+            self.message_text.append("Switched to Construction mode")
+
+            # This allows "Add Material Line" to work without requiring "New Construction Layer"
+            self.construction_layer_info = {
+                'folder': full_layer_path,   # This is the full path to the current construction layer
+                'name': layer_name
+            }
+            # Also set the path for immediate use (same as in new construction)
+            self.current_construction_layer_path = full_layer_path
+
+            self.message_text.append(f"Construction layer ready: {layer_name}")
+            self.message_text.append("You can now add Material Lines.")
         else:
             self.surface_container.setVisible(category == "Road")
             self.construction_container.setVisible(category == "Road")
@@ -1455,36 +1566,29 @@ class PointCloudViewer(ApplicationUI):
 
         self.add_layer_to_panel(layer_name, dimension)
 
-        # Load point cloud if linked
+        # Load linked point cloud
         pc_file = config.get("point_cloud_file")
         if pc_file and os.path.exists(pc_file):
             self.load_point_cloud_from_path(pc_file)
 
-        # Final feedback
-        self.message_text.append(f"Successfully opened worksheet:")
-        self.message_text.append(f"   → Worksheet: {worksheet_name}")
-        self.message_text.append(f"   → Section: {subfolder_type}")
-        self.message_text.append(f"   → Layer: {layer_name}")
-        self.message_text.append(f"   → 2D graph: {'All baselines (solid)' if subfolder_type == 'designs' else 'Reference baseline (dotted)' if dotted_line_drawn else 'No reference baseline'}")
-        self.message_text.append(f"   → 3D planes: {len(loaded_baselines)} baselines {'from design layer' if subfolder_type == 'construction' else 'from this layer'}")
-        if referenced_design_layer:
-            self.message_text.append(f"   → Design ref: {referenced_design_layer} {'(loaded)' if design_points_loaded else '(not found)'}")
-        if subfolder_type == "construction" and referenced_baseline:
-            self.message_text.append(f"   → Baseline ref: {referenced_baseline} (dotted)")
-        self.message_text.append(f"   → Zero line: {'Loaded' if zero_loaded else 'Not found'}")
+        # Final summary
+        self.message_text.append(f"Opened: {worksheet_name} → {subfolder_type}/{layer_name}")
+        self.message_text.append(f"   • Baselines shown: {'All (solid)' if subfolder_type == 'designs' else f'{dotted_lines_drawn} reference(s) (dotted)'}")
+        self.message_text.append(f"   • 3D Planes: {len(loaded_baselines)}")
+        self.message_text.append(f"   • Zero Line: {'Loaded' if zero_loaded else 'Not loaded'}")
 
         QMessageBox.information(self, "Worksheet Opened",
-                                f"<b>{worksheet_name}</b><br><br>"
-                                f"Layer: <i>{layer_name}</i> ({subfolder_type})<br>"
-                                f"2D Graph: {'All baselines (solid)' if subfolder_type == 'designs' else 'Reference baseline (dotted)' if dotted_line_drawn else 'No reference baseline'}<br>"
-                                f"3D Planes: {len(loaded_baselines)} baselines loaded<br>"
-                                f"Zero Line: {'Yes' if zero_loaded else 'No'}<br>"
-                                f"Design ref: {referenced_design_layer or 'None'}<br>"
+                                f"<b>{worksheet_name}</b>\n"
+                                f"Layer: <i>{layer_name}</i> ({subfolder_type})\n\n"
+                                f"2D View: {'All baselines' if subfolder_type == 'designs' else f'{dotted_lines_drawn} reference baseline(s) (dotted)'}\n"
+                                f"3D Planes: {len(loaded_baselines)} generated\n"
+                                f"Zero Line: {'Yes' if zero_loaded else 'No'}\n"
                                 f"Mode: {'Construction' if is_construction_layer else 'Design'}")
 
         self.canvas.draw_idle()
         if hasattr(self, 'vtk_widget'):
             self.vtk_widget.GetRenderWindow().Render()
+
 # ==========================================================================================================================================================
     def load_json_files_to_3d_pointcloud(self, folder_path):
         """
@@ -4001,10 +4105,16 @@ class PointCloudViewer(ApplicationUI):
         self.add_material_line_button.clicked.connect(self.open_material_line_dialog)
    
         self.volume_slider.valueChanged.connect(self.volume_changed)
-        
+
+        # # Connect graph click for drawing new points (construction, material, etc.)
+        if hasattr(self, 'canvas') and self.canvas:
+            self.graph_click_id = self.canvas.mpl_connect('button_press_event', self.on_graph_click)
+            print("Graph click event connected")  # Debug - remove later
+
         # Connect graph hover event
         self.cid_hover = self.canvas.mpl_connect('motion_notify_event', self.on_hover)
-        
+
+
         # Connect undo/redo buttons
         self.undo_button.clicked.connect(self.undo_graph)
         self.redo_button.clicked.connect(self.redo_graph)
@@ -4737,7 +4847,6 @@ class PointCloudViewer(ApplicationUI):
         
         # ===== ADD THIS SECTION: Hide road/bridge baseline checkboxes and reset button names =====
         # Reset road baseline
-
         self.road_surface_container.setVisible(False)
         self.surface_container.setVisible(False)
         self.zero_container.setVisible(False)
@@ -5581,18 +5690,24 @@ class PointCloudViewer(ApplicationUI):
     def get_current_design_layer_path(self):
         """Return path to current active design layer, fallback to worksheet root"""
         if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
-            self.message_text.append("No active worksheet — cannot save zero line config.")
+            self.message_text.append("No active worksheet — cannot determine layer path.")
             return None
+
         worksheet_path = os.path.join(self.WORKSHEETS_BASE_DIR, self.current_worksheet_name)
+
+        # If we have a current construction layer
         if hasattr(self, 'current_layer_name') and self.current_layer_name:
-            layer_path = os.path.join(worksheet_path, "designs", self.current_layer_name)
+            # Assuming construction layers are inside "construction" subfolder
+            layer_path = os.path.join(worksheet_path, "construction", self.current_layer_name)
             if os.path.exists(layer_path):
                 return layer_path
             else:
-                self.message_text.append(f"Design layer folder not found: {layer_path}")
-                self.message_text.append("Saving zero_line_config.json in worksheet root.")
+                self.message_text.append(f"Construction layer folder not found: {layer_path}")
+        
+        # Fallback to worksheet root
+        self.message_text.append("Using worksheet root for saving (no active construction layer).")
         return worksheet_path
-
+    
 # =========================================================================================================================================================
     def save_zero_line_config_to_current_layer(self):
         """Save zero line configuration as JSON in current design layer or worksheet root"""
@@ -5632,7 +5747,848 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(error_msg)
             QMessageBox.critical(self, "Save Failed", error_msg)
             return False
-        
+
+# =====================================================================================================================
+
+    def format_chainage(self, x, for_dialog=False):
+        """Convert chainage in meters to KM+Interval format"""
+        if not self.zero_line_set or self.zero_start_km is None or self.zero_interval <= 0:
+            return f"{x:.2f}m"
+
+        interval_number = int(round(x / self.zero_interval))
+        interval_value = int(round(interval_number * self.zero_interval))
+
+        km = self.zero_start_km
+        interval_str = f"{interval_value:03d}"
+
+        chainage_str = f"{km}+{interval_str}"
+
+        # Only add approx note if NOT for dialog
+        if not for_dialog:
+            exact_interval = interval_number * self.zero_interval
+            if abs(x - exact_interval) > 0.01:
+                chainage_str += f" (approx {x:.2f}m)"
+
+        return chainage_str
+
+# =======================================================================================================================================
+# MODIFY toggle_material_line_visibility() IN pointcloudviewer.py
+# =======================================================================================================================================
+    def toggle_material_line_visibility(self, index, state):
+        """Toggle visibility and activate drawing mode for material line"""
+        if 0 <= index < len(self.material_items):
+            item = self.material_items[index]
+            is_visible = state == Qt.Checked
+            item['data']['visible'] = is_visible
+            
+            if index < len(self.material_configs):
+                self.material_configs[index]['visible'] = is_visible
+
+            if is_visible:
+                # Activate this line for drawing
+                self.active_material_index = index
+                self.active_line_type = 'material'
+
+                # Clear only the temporary preview (not permanent lines)
+                if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
+                    self.current_material_line_artist.remove()
+                    self.current_material_line_artist = None
+                self.material_drawing_points = []
+
+                self.message_text.append(
+                    f"Material line M{index+1} activated.\n"
+                    "• Left-click to add points\n"
+                    "• Press ESC to finish and open dialog\n"
+                    "• Right-click to cancel current line"
+                )
+
+                # === REDRAW ALL SAVED POLYLINES FOR THIS MATERIAL INDEX ===
+                if index in self.material_polylines_artists:
+                    for artist in self.material_polylines_artists[index]:
+                        if artist not in self.ax.lines:  # Avoid duplicates
+                            self.ax.add_line(artist)
+
+                # Connect key press (only once)
+                if not hasattr(self, 'material_key_press_id'):
+                    self.material_key_press_id = self.canvas.mpl_connect('key_press_event', self.on_material_key_press)
+
+            else:
+                # Deactivate if this was the active one
+                if self.active_material_index == index:
+                    self.active_material_index = None
+                    self.active_line_type = None
+
+                    # Clear temporary preview
+                    if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
+                        self.current_material_line_artist.remove()
+                        self.current_material_line_artist = None
+                    self.material_drawing_points = []
+
+                # === HIDE ALL SAVED LINES FOR THIS MATERIAL ===
+                if index in self.material_polylines_artists:
+                    for artist in self.material_polylines_artists[index]:
+                        if artist in self.ax.lines:
+                            artist.remove()
+
+                self.message_text.append(f"Material line M{index+1} deactivated.")
+
+            self.canvas.draw_idle()
+    # =====================================================================
+    # NEW: Handle ESC key to finish material line drawing
+    # =====================================================================
+    def on_material_key_press(self, event):
+        """Handle ESC key to finish material drawing"""
+        if event.key == 'escape' and self.active_line_type == 'material':
+            if len(self.material_drawing_points) >= 2:
+                self.finish_material_segment()
+            else:
+                self.message_text.append("Need at least 2 points to finish material segment.")
+
+    # =====================================================================
+    # UPDATED: on_material_draw_click – handles only left-click and right-click (cancel)
+    # =====================================================================
+    def on_material_draw_click(self, event):
+        """Handle mouse clicks for material line drawing (preview only)"""
+        if event.inaxes != self.ax or self.active_material_index is None:
+            return
+
+        x, y = event.xdata, event.ydata
+        if x is None or y is None or not (0 <= x <= self.total_distance):
+            return
+
+        if event.button == 1:  # Left click
+            self.material_drawing_points.append((x, y))
+
+            # Remove old preview
+            if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
+                self.current_material_line_artist.remove()
+
+            xs = [p[0] for p in self.material_drawing_points]
+            ys = [p[1] for p in self.material_drawing_points]
+
+            # Draw new preview
+            self.current_material_line_artist = self.ax.plot(
+                xs, ys,
+                color='orange',
+                linewidth=3,
+                linestyle='--',  # dashed preview
+                alpha=0.7
+            )[0]
+
+            self.canvas.draw_idle()
+            self.message_text.append(f"Point added at {self.format_chainage(x)}")
+
+        elif event.button == 3:  # Right click → cancel current
+            if self.material_drawing_points:
+                self.material_drawing_points = []
+                if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
+                    self.current_material_line_artist.remove()
+                    self.current_material_line_artist = None
+                self.canvas.draw_idle()
+                self.message_text.append("Current drawing cancelled.")
+    # =====================================================================
+    # Keep your existing _clear_current_drawing()
+    # =====================================================================
+    # def _clear_current_drawing(self):
+    #     if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
+    #         self.current_material_line_artist.remove()
+    #         self.current_material_line_artist = None
+    #     self.material_drawing_points = []
+    #     self.canvas.draw_idle()
+
+# =======================================================================================================================================
+    def finish_material_segment(self):
+        """Finish the current material line drawing and save permanently with real-world coordinates"""
+        material_idx = self.active_material_index
+
+        if not self.material_drawing_points or len(self.material_drawing_points) < 2:
+            self.message_text.append("Not enough points to finish segment.")
+            return
+
+        first_point = self.material_drawing_points[0]
+        last_point  = self.material_drawing_points[-1]
+
+        first_x = first_point[0]
+        last_x  = last_point[0]
+
+        from_chainage_str = self.format_chainage(first_x, for_dialog=True)
+        to_chainage_str   = self.format_chainage(last_x, for_dialog=True)
+
+        dialog = MaterialSegmentDialog(
+            from_chainage=from_chainage_str,
+            to_chainage=to_chainage_str,
+            material_thickness=None,
+            width=None,
+            after_rolling=None,
+            parent=self
+        )
+        dialog.setWindowTitle(f"Material Segment - M{material_idx+1}")
+
+        if dialog.exec_() == QDialog.Accepted:
+            config = dialog.get_data()
+            if config is None:
+                return
+
+            from_m = config.get('from_chainage_m')
+            to_m   = config.get('to_chainage_m')
+            recorded_thickness_mm = config.get('material_thickness_m', 0)
+
+            if from_m is None or to_m is None or to_m <= from_m:
+                QMessageBox.warning(self, "Invalid Input", "From chainage must be less than To chainage.")
+                return
+
+            if recorded_thickness_mm <= 0:
+                reply = QMessageBox.question(
+                    self, "Thickness Zero",
+                    "Material thickness is 0 mm. This will be saved for records,\n"
+                    "but actual displayed thickness is based on drawn line height.\n\n"
+                    "Continue anyway?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if reply == QMessageBox.No:
+                    return
+
+            # === SAVE TO JSON WITH REAL 3D COORDINATES FROM ZERO LINE ===
+            self.save_material_segment_to_json(
+                material_idx=material_idx,
+                config=config,
+                from_m=from_m,
+                to_m=to_m,
+                point_number=None
+            )
+
+            # === DRAW PERMANENT ORANGE POLYLINE ===
+            xs = [p[0] for p in self.material_drawing_points]
+            ys = [p[1] for p in self.material_drawing_points]
+
+            permanent_line = self.ax.plot(
+                xs, ys,
+                color='orange',
+                linewidth=3,
+                linestyle='-',
+                marker='o',
+                markersize=6,
+                markerfacecolor='orange',
+                markeredgecolor='darkred',
+                alpha=0.9
+            )[0]
+
+            if not hasattr(self, 'material_polylines_artists'):
+                self.material_polylines_artists = {}
+            if material_idx not in self.material_polylines_artists:
+                self.material_polylines_artists[material_idx] = []
+            self.material_polylines_artists[material_idx].append(permanent_line)
+
+            # Clear preview
+            if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
+                self.current_material_line_artist.remove()
+                self.current_material_line_artist = None
+            self.material_drawing_points = []
+
+            # Draw filling
+            self.draw_material_filling(
+                from_chainage_m=from_m,
+                to_chainage_m=to_m,
+                thickness_m=0,
+                material_index=material_idx,
+                material_config=self.material_configs[material_idx],
+                color='#FF9800',
+                alpha=0.6
+            )
+
+            self.message_text.append(f"Material segment added permanently: M{material_idx+1}")
+            self.message_text.append(f"   Chainage: {self.format_chainage(from_m)} → {self.format_chainage(to_m)}")
+            if recorded_thickness_mm > 0:
+                self.message_text.append(f"   Recorded thickness: {recorded_thickness_mm:.0f} mm (documentation)")
+            self.message_text.append("   Real-world 3D coordinates (X,Y,Z) saved from zero line endpoints.")
+
+            self.canvas.draw_idle()
+
+        else:
+            # Cancelled
+            if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
+                self.current_material_line_artist.remove()
+                self.current_material_line_artist = None
+            self.material_drawing_points = []
+            self.message_text.append("Material segment cancelled.")
+            self.canvas.draw_idle()
+
+# =======================================================================================================================================
+# CONSOLIDATED: Single setup_label_click_handler (remove duplicates; use unified on_label_pick)
+# =======================================================================================================================================
+    def setup_label_click_handler(self):
+        """Set up the unified label click event handler after canvas is fully initialized"""
+        if self.canvas:
+            # Disconnect any existing to avoid duplicates
+            if hasattr(self, 'label_pick_id') and self.label_pick_id is not None:
+                try:
+                    self.canvas.mpl_disconnect(self.label_pick_id)
+                except ValueError:
+                    pass  # Already disconnected
+            self.label_pick_id = self.canvas.mpl_connect('pick_event', self.on_label_pick)  # Unified handler
+            print("Unified pick event connected")  # Debug - remove later
+
+# ====================================================================================================================================================
+    def on_label_pick(self, event):
+        """
+        Unified handler for clicking on labels (construction dots or material dots).
+        Handles configuration dialogs and updates visuals accordingly.
+        Also saves material segment data to JSON files.
+        """
+        if not hasattr(event.artist, 'point_data'):
+            return
+
+        artist = event.artist
+        point_data = artist.point_data
+
+        # =====================================================================
+        # Handle CONSTRUCTION dot click
+        # =====================================================================
+        if point_data.get('type') == 'construction_dot':
+            point_number = point_data['point_number']
+            x = point_data['x']
+            y = point_data['y']
+
+            # Calculate chainage label (KM+Interval format)
+            if self.zero_line_set and hasattr(self, 'zero_start_km') and self.zero_start_km is not None:
+                interval_number = int(round(x / self.zero_interval)) if self.zero_interval > 0 else 0
+                interval_value = interval_number * self.zero_interval
+                chainage_label = f"{self.zero_start_km}+{interval_value:03d}"
+                if abs(x - interval_value) > 0.01:
+                    chainage_label += f" (approx, actual: {x:.2f}m)"
+            else:
+                chainage_label = f"Distance: {x:.2f}m"
+
+            # Open construction configuration dialog
+            dialog = ConstructionConfigDialog(chainage_label, self)
+            dialog.setWindowTitle(f"Construction Configuration - Point P{point_number}")
+
+            if dialog.exec_() == QDialog.Accepted:
+                config = dialog.get_configuration()
+                self.message_text.append(f"Construction configuration saved for Point P{point_number}:")
+                self.message_text.append(f"  Chainage: {config['chainage']}")
+
+                # Store config
+                point_data['config'] = config
+
+                # Update label appearance to show configured
+                if hasattr(artist, 'set_text'):
+                    artist.set_text(f'P{point_number}✓')
+                if hasattr(artist, 'set_bbox'):
+                    artist.set_bbox(dict(
+                        boxstyle='round,pad=0.5',
+                        facecolor='lightgreen',
+                        alpha=0.9,
+                        edgecolor='green',
+                        linewidth=2
+                    ))
+
+                self.canvas.draw_idle()
+
+            return
+
+        # =====================================================================
+        # Handle MATERIAL dot click
+        # =====================================================================
+        elif point_data.get('type') == 'material_dot':
+            point_number = point_data['point_number']
+            x = point_data['x']                     # chainage in meters
+            y = point_data['y']
+            material_idx = point_data['material_index']
+            current_config = point_data.get('config', {})
+
+            # Pre-fill "From" with the clicked point's chainage
+            from_chainage_str = self.format_chainage(x, for_dialog=True)
+
+            # Open Material Segment Dialog
+            dialog = MaterialSegmentDialog(
+                from_chainage=from_chainage_str,
+                to_chainage="",
+                material_thickness=current_config.get('material_thickness_m'),
+                width=current_config.get('width_m'),
+                after_rolling=current_config.get('after_rolling_thickness_m'),
+                parent=self
+            )
+            dialog.setWindowTitle(f"Material Segment Configuration - M{material_idx + 1}-{point_number}")
+
+            if dialog.exec_() == QDialog.Accepted:
+                config = dialog.get_data()
+                if config is None:
+                    return
+
+                from_m = config['from_chainage_m']
+                to_m   = config['to_chainage_m']
+                thickness_m = config['material_thickness_m']
+
+                # Validation
+                if from_m is None or to_m is None:
+                    QMessageBox.warning(self, "Invalid Input", "Both From and To chainage must be provided.")
+                    return
+                if to_m <= from_m:
+                    QMessageBox.warning(self, "Invalid Range", "To chainage must be greater than From chainage.")
+                    return
+                if thickness_m <= 0:
+                    QMessageBox.warning(self, "Invalid Thickness", "Thickness must be greater than 0 mm.")
+                    return
+
+                # ========================================================
+                # SAVE TO JSON FILE (in materials/ folder)
+                # ========================================================
+                self.save_material_segment_to_json(
+                    material_idx=material_idx,
+                    config=config,
+                    from_m=from_m,
+                    to_m=to_m,
+                    point_number=point_number
+                )
+
+                # Update stored config on the point
+                point_data['config'] = config
+
+                # Update label text and visual feedback
+                new_label = f"M{material_idx + 1}-{point_number}✓"
+                if thickness_m:
+                    new_label += f" ({thickness_m:.0f}mm)"
+                artist.set_text(new_label)
+
+                artist.set_bbox(dict(
+                    facecolor='lightgreen',
+                    alpha=0.9,
+                    edgecolor='green',
+                    linewidth=2
+                ))
+
+                # Draw the material filling (adds new one — previous ones stay intact)
+                self.draw_material_filling(
+                    from_chainage_m=from_m,
+                    to_chainage_m=to_m,
+                    thickness_m=thickness_m,
+                    material_index=material_idx,
+                    material_config=self.material_configs[material_idx],
+                    color='#FF9800',
+                    alpha=0.55
+                )
+
+                # Optional: Store segment for later export or editing
+                if not hasattr(self, 'material_segments'):
+                    self.material_segments = []
+                self.material_segments.append({
+                    'material_index': material_idx,
+                    'point_number': point_number,
+                    'from_m': from_m,
+                    'to_m': to_m,
+                    'thickness_m': thickness_m,
+                    'width_m': config.get('width_m'),
+                    'after_rolling_mm': config.get('after_rolling_thickness_m'),
+                    'label_artist': artist
+                })
+
+                self.canvas.draw_idle()
+
+                # User feedback
+                self.message_text.append(f"Material segment configured: M{material_idx + 1}-{point_number}")
+                self.message_text.append(f"  From: {self.format_chainage(from_m)}")
+                self.message_text.append(f"  To:   {self.format_chainage(to_m)}")
+                self.message_text.append(f"  Thickness: {thickness_m:.0f} mm")
+                self.message_text.append(f"  Width: {config.get('width_m', 0):.1f} m")
+                self.message_text.append(f"  After Rolling: {config.get('after_rolling_thickness_m', 0):.0f} mm")
+                self.message_text.append("  → JSON file saved in 'materials/' folder")
+                self.message_text.append("")
+
+            else:
+                self.message_text.append(f"Material segment configuration cancelled for M{material_idx + 1}-{point_number}")
+
+# ========================================================
+    def save_material_segment_to_json(self, material_idx, config, from_m, to_m, point_number=None):
+        """
+        Save material segment with REAL 3D coordinates + formatted chainage strings (e.g., "101+000").
+        Includes both structured data and human-readable chainage strings.
+        """
+        import os
+        import json
+        from datetime import datetime
+        import numpy as np
+
+        if not self.current_worksheet_name:
+            QMessageBox.warning(self, "No Worksheet", "No active worksheet found.")
+            return
+
+        if material_idx >= len(self.material_configs):
+            QMessageBox.warning(self, "Invalid Index", "Material line index out of range.")
+            return
+
+        mat_config = self.material_configs[material_idx]
+        folder_name = mat_config.get('folder_name')
+        display_name = mat_config.get('name', folder_name)
+
+        if not folder_name:
+            QMessageBox.critical(self, "Error", "Material folder name not found.")
+            return
+
+        if not hasattr(self, 'current_construction_layer_path') or not self.current_construction_layer_path:
+            QMessageBox.warning(self, "No Layer Path", "Current construction layer path not set.")
+            return
+
+        material_folder_path = os.path.join(self.current_construction_layer_path, folder_name)
+        if not os.path.exists(material_folder_path):
+            QMessageBox.warning(self, "Folder Not Found", f"Material folder not found:\n{material_folder_path}")
+            return
+
+        # === INTERPOLATE REAL 3D COORDINATES USING ZERO LINE ENDPOINTS ===
+        def interpolate_xyz(chainage_m):
+            if (not self.zero_line_set or 
+                not hasattr(self, 'zero_start_point') or 
+                not hasattr(self, 'zero_end_point') or 
+                self.total_distance <= 0):
+                return None, None, None
+
+            t = np.clip(chainage_m / self.total_distance, 0.0, 1.0)
+            start = np.array(self.zero_start_point)
+            end = np.array(self.zero_end_point)
+            point_3d = start + t * (end - start)
+            return round(point_3d[0], 3), round(point_3d[1], 3), round(point_3d[2], 3)
+
+        from_X, from_Y, from_Z = interpolate_xyz(from_m)
+        to_X,   to_Y,   to_Z   = interpolate_xyz(to_m)
+
+        # === KM + Interval Calculation ===
+        def get_km_interval(chainage_m):
+            if not hasattr(self, 'zero_start_km') or self.zero_start_km is None:
+                return 0, round(chainage_m, 3)
+            km = int(self.zero_start_km)
+            interval = chainage_m - (km * 1000)
+            return km, round(interval, 3)
+
+        from_km, from_interval = get_km_interval(from_m)
+        to_km,   to_interval   = get_km_interval(to_m)
+
+        # === FORMATTED CHAINAGE STRINGS (e.g., "101+000", "101+080") ===
+        from_chainage_str = f"{from_km}+{int(from_interval):03d}"
+        to_chainage_str   = f"{to_km}+{int(to_interval):03d}"
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        suffix = f"_P{point_number}" if point_number is not None else ""
+        filename = f"material_{folder_name}{suffix}_{timestamp}.json"
+        filepath = os.path.join(material_folder_path, filename)
+
+        data = {
+            "material_line_folder": folder_name,
+            "material_line_name": display_name,
+            "point_number": point_number,
+            "from_chainage": {
+                "coordinates": [
+                    from_X,
+                    from_Y,
+                    from_Z
+                ],
+                "km": from_km,
+                "chainage_m": from_interval
+            },
+            "to_chainage": {
+                "coordinates": [
+                    to_X,
+                    to_Y,
+                    to_Z
+                ],
+                "km": to_km,
+                "chainage_m": to_interval
+            },
+            "from_chainage_str": from_chainage_str,   # ← NEW: "101+000"
+            "to_chainage_str": to_chainage_str,       # ← NEW: "101+080"
+            "material_thickness_m": config.get('material_thickness_m', 0),
+            "width_m": config.get('width_m'),
+            "after_rolling_thickness_m": config.get('after_rolling_thickness_m'),
+            "created_at": datetime.now().isoformat(),
+            "worksheet": self.current_worksheet_name,
+            "construction_layer": os.path.basename(self.current_construction_layer_path)
+        }
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+
+            self.message_text.append(f"  → Saved: {filename}")
+            self.message_text.append("  → Real 3D coordinates + formatted chainage strings saved.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Save Failed", f"Error saving JSON:\n{str(e)}")
+            self.message_text.append(f"  → Save error: {str(e)}")
+
+
+    def get_real_coordinates_from_chainage(self, chainage_m):
+        """
+        Return real-world (X, Y, Z) coordinates for a given chainage in meters.
+        Customize this based on your alignment data.
+        """
+        if not hasattr(self, 'horizontal_alignment') or not hasattr(self, 'vertical_profile'):
+            # Fallback: return None if no alignment data
+            return None, None, None
+
+        # Example: Horizontal alignment gives Easting (X), Northing (Y)
+        try:
+            X, Y = self.horizontal_alignment.get_xy(chainage_m)  # Your actual method
+        except:
+            X, Y = None, None
+
+        # Example: Vertical profile gives Z (elevation)
+        try:
+            Z = self.vertical_profile.get_elevation(chainage_m)  # Your actual method
+        except:
+            Z = None
+
+        return X, Y, Z
+
+    def get_km_and_interval(self, chainage_m):
+        """Return km (int) and interval meters (float) from total chainage"""
+        if not hasattr(self, 'zero_start_km') or self.zero_start_km is None:
+            return 0, chainage_m
+
+        km = int(self.zero_start_km)
+        interval = chainage_m - (km * 1000)
+        return km, round(interval, 3)
+
+
+# ============================================================================================================================
+    # New/Updated unified handler (add to class)
+    def on_graph_click(self, event):
+        """Unified mouse click handler for all drawing modes"""
+        if event.inaxes != self.ax:
+            return
+
+        x, y = event.xdata, event.ydata
+        if x is None or y is None:
+            return
+
+        if not self.zero_line_set:
+            self.message_text.append("Set zero line first before drawing points.")
+            return
+
+        if not (0 <= x <= self.total_distance):
+            self.message_text.append(f"Click outside chainage range (0-{self.total_distance:.1f}m).")
+            return
+
+        if self.active_line_type == 'construction':
+            self.on_construction_click(event)
+        elif self.active_line_type == 'material' and self.active_material_index is not None:
+            self.on_material_draw_click(event) 
+        else:
+            self.message_text.append("No active drawing mode selected.")
+
+# =======================================================================================================================================
+# ASSUMED EXISTING: on_construction_click (mirror this logic for material - add if missing)
+# =======================================================================================================================================
+    def on_construction_click(self, event):
+        """Handle click for new construction dots (existing logic - provided for reference)"""
+        # This mirrors your existing construction plotting (adapt if your exact code differs)
+        if not self.construction_mode_active:  # Or whatever guard you have
+            return
+        x, y = event.xdata, event.ydata
+        if x is None or y is None:
+            return
+        next_num = getattr(self, 'construction_point_number', 1)  # Assuming you track this
+
+        # Create dot
+        dot_artist = self.ax.plot(x, y, 'o', color='red', markersize=6, picker=True)[0]
+        dot_artist.set_pickradius(10)
+        dot_artist.point_data = {
+            'type': 'construction_dot',
+            'point_number': next_num,
+            'x': x,
+            'y': y,
+            'config': {}
+        }
+
+        # Create label
+        label_text = f"P{next_num}"
+        label_y = y + 0.15
+        label_artist = self.ax.annotate(label_text, (x, label_y),
+                                        xytext=(0, 8), textcoords='offset points',
+                                        bbox=dict(boxstyle='round,pad=0.3', facecolor='red', alpha=0.7),
+                                        ha='center', fontsize=8, picker=True)
+        # Note: No set_pickradius for annotation
+        label_artist.point_data = dot_artist.point_data
+
+        # Store (assuming you have self.construction_dots = [] in init)
+        if not hasattr(self, 'construction_dots'):
+            self.construction_dots = []
+        self.construction_dots.append({
+            'x': x, 'y': y, 'config': {}, 'label': label_artist,
+            'point_number': next_num
+        })
+
+        # Update number
+        self.construction_point_number = next_num + 1
+
+        # Store in line_types
+        self.line_types['construction']['artists'].append(dot_artist)
+        self.line_types['construction']['polylines'].append([(x, y)])
+
+        self.canvas.draw_idle()
+        self.message_text.append(f"Construction dot P{next_num} placed at {x:.2f}m. Click to configure.")
+
+# =======================================================================================================================================
+# UPDATE toggle for construction (if exists, add similar activation)
+# =======================================================================================================================================
+    def toggle_construction_line(self, state):  # Assuming this exists for construction checkbox
+        """Toggle construction mode like material"""
+        if state == Qt.Checked:
+            self.active_line_type = 'construction'
+            self.construction_mode_active = True
+            self.message_text.append("Construction mode activated for drawing.")
+            if not hasattr(self, 'construction_point_number'):
+                self.construction_point_number = 1
+        else:
+            self.active_line_type = None
+            self.construction_mode_active = False
+            self.message_text.append("Construction mode deactivated.")
+
+
+
+# =================================================================================================================
+    def draw_material_filling(self, from_chainage_m, to_chainage_m, thickness_m,
+                              material_index, material_config, color='#FF9800', alpha=0.6):
+        """
+        Draws dense black cross-hatching ('xx') with light orange background
+        by directly loading the selected baseline JSON from the design layer.
+        Uses exact path logic from MaterialLineDialog.
+        """
+        if not hasattr(self, 'ax') or self.ax is None:
+            return
+
+        ref_xs, ref_ys = self._load_baseline_from_design_layer(material_config)
+        if ref_xs is None:
+            self.message_text.append(f"Failed to load baseline for '{material_config.get('ref_layer')}'. Hatching skipped.")
+            return
+
+        # Get material line points
+        mat_xs, mat_ys = [], []
+        if hasattr(self, 'material_drawing_points') and self.material_drawing_points:
+            points = [p for p in self.material_drawing_points 
+                      if from_chainage_m <= p[0] <= to_chainage_m]
+            if len(points) >= 2:
+                mat_xs = [p[0] for p in points]
+                mat_ys = [p[1] for p in points]
+
+        if not mat_xs and material_index in self.material_polylines_artists:
+            artists = self.material_polylines_artists[material_index]
+            if artists:
+                line = artists[-1]
+                xdata = line.get_xdata()
+                ydata = line.get_ydata()
+                mask = (xdata >= from_chainage_m) & (xdata <= to_chainage_m)
+                mat_xs = xdata[mask].tolist()
+                mat_ys = ydata[mask].tolist()
+
+        if len(mat_xs) < 2:
+            self.message_text.append("Material line has no valid points.")
+            return
+
+        # Dense interpolation
+        x_dense = np.linspace(from_chainage_m, to_chainage_m, 1500)
+        ref_y_interp = np.interp(x_dense, ref_xs, ref_ys, left=ref_ys[0], right=ref_ys[-1])
+        mat_y_interp = np.interp(x_dense, mat_xs, mat_ys, left=mat_ys[0], right=mat_ys[-1])
+
+        # Polygon vertices
+        vertices = np.vstack([
+            np.column_stack([x_dense, ref_y_interp]),
+            np.column_stack([x_dense[::-1], mat_y_interp[::-1]])
+        ])
+
+        from matplotlib.patches import Polygon
+
+        # Light orange background
+        bg = Polygon(vertices, closed=True, facecolor=color, alpha=0.3, edgecolor='none', zorder=2)
+        self.ax.add_patch(bg)
+
+        # Dense cross-hatching
+        hatch = Polygon(vertices, closed=True, facecolor='none', hatch='xx', linewidth=0, zorder=3)
+        self.ax.add_patch(hatch)
+
+        # Thickness label
+        avg_mm = np.mean(mat_y_interp - ref_y_interp) * 1000
+        mid_x = (from_chainage_m + to_chainage_m) / 2
+        mid_y = np.mean(ref_y_interp) + avg_mm / 2000
+
+        self.ax.text(mid_x, mid_y,
+                     f"M{material_index+1}\n{avg_mm:.0f}mm",
+                     ha='center', va='center', fontsize=9, fontweight='bold',
+                     color='black',
+                     bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', boxstyle='round,pad=0.5'),
+                     zorder=4)
+
+        if not hasattr(self, 'material_fill_patches'):
+            self.material_fill_patches = []
+        self.material_fill_patches.append({'bg': bg, 'hatch': hatch})
+
+        self.canvas.draw_idle()
+        self.message_text.append(f"Hatching successfully drawn for M{material_index+1} using '{material_config.get('ref_layer')}' baseline")
+
+
+    def _load_baseline_from_design_layer(self, material_config):
+        """
+        Loads the baseline JSON directly from the design layer.
+        Uses the EXACT same path logic as MaterialLineDialog.load_available_baselines().
+        """
+        if not material_config.get('from_another', False):
+            return None, None
+
+        selected = material_config.get('ref_layer', '').strip()
+        if not selected or selected == "None":
+            return None, None
+
+        # Must have current construction layer path
+        if not hasattr(self, 'current_construction_layer_path') or not self.current_construction_layer_path:
+            self.message_text.append("Current construction layer path not set.")
+            return None, None
+
+        config_path = os.path.join(self.current_construction_layer_path, "Construction_Layer_config.txt")
+        if not os.path.exists(config_path):
+            self.message_text.append(f"Construction_Layer_config.txt not found at {config_path}")
+            return None, None
+
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        except Exception as e:
+            self.message_text.append(f"Error reading Construction_Layer_config.txt: {str(e)}")
+            return None, None
+
+        ref_layer_name = config.get("reference_layer_2d")
+        if not ref_layer_name:
+            self.message_text.append("No reference_layer_2d in Construction_Layer_config.txt")
+            return None, None
+
+        design_layer_path = os.path.normpath(
+            os.path.join(self.current_construction_layer_path, "..", "..", "designs", ref_layer_name)
+        )
+
+        if not os.path.exists(design_layer_path):
+            self.message_text.append(f"Design layer folder not found: {design_layer_path}")
+            return None, None
+
+        baseline_file = f"{selected}_baseline.json"
+        baseline_path = os.path.join(design_layer_path, baseline_file)
+
+        if not os.path.exists(baseline_path):
+            self.message_text.append(f"Baseline file not found: {baseline_path}")
+            return None, None
+
+        try:
+            with open(baseline_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            if 'points' not in data or len(data['points']) < 2:
+                self.message_text.append("Baseline file has no valid points.")
+                return None, None
+
+            xs = [p[0] for p in data['points']]
+            ys = [p[1] for p in data['points']]
+            return xs, ys
+
+        except Exception as e:
+            self.message_text.append(f"Error reading baseline file {baseline_path}: {str(e)}")
+            return None, None
+
 # ========================================================================================================================================
 #                                                   *** END OF APPLICAATION ***
-# =======================================================================================================================================      
+# ========================================================================================================================================      

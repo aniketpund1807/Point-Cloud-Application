@@ -725,17 +725,20 @@ class ConstructionConfigDialog(QDialog):
             "span_width": self.le_span_width.text(),
         }
     
-# ===========================================================================================================================
-# ** MATERIAL LINE DIALOG ** 
-# ===========================================================================================================================    
 
+# ===========================================================================================================================
+# ** MATERIAL LINE DIALOG ** (FINAL CORRECTED VERSION – ONLY SHOWS SELECTED BASELINES)
+# ===========================================================================================================================
 class MaterialLineDialog(QDialog):
-    def __init__(self, material_data=None, parent=None):
+    def __init__(self, material_data=None, construction_layer_path=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Create New Construction Layer")
+        self.setWindowTitle("Create New Material Line")
         self.setModal(True)
         self.setFixedSize(500, 650)
-        
+
+        # Store the path to the current construction layer folder
+        self.construction_layer_path = construction_layer_path
+        self.parent_app = parent
         self.material_data = material_data if material_data else {
             'name': '',
             'description': '',
@@ -747,27 +750,22 @@ class MaterialLineDialog(QDialog):
             'initial_filling': 0.0,
             'final_compressed': 0.0
         }
-        
         self.setup_ui()
         self.load_material_data()
         self.update_ui_visibility()
-    
+        self.load_available_baselines()  # ← This now loads ONLY selected baselines
+
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
         layout.setContentsMargins(25, 25, 25, 25)
-        
-        # Centered Title
-        title_label = QLabel("Material line Configuration")
-        title_label.setStyleSheet("""
-            font-size: 18px;
-            font-weight: bold;
-            color: #000000;
-            padding-bottom: 15px;
-        """)
+
+        # Title
+        title_label = QLabel("Material Line Configuration")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #000000; padding-bottom: 15px;")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
-        
+
         # Material Line Name
         name_layout = QHBoxLayout()
         name_label = QLabel("Material line name:")
@@ -777,7 +775,7 @@ class MaterialLineDialog(QDialog):
         name_layout.addWidget(name_label)
         name_layout.addWidget(self.name_input, 1)
         layout.addLayout(name_layout)
-        
+
         # Material Type
         type_layout = QHBoxLayout()
         type_label = QLabel("Material Type:")
@@ -785,110 +783,89 @@ class MaterialLineDialog(QDialog):
         self.type_input = QLineEdit()
         self.type_input.setPlaceholderText("Enter material type")
         type_layout.addWidget(type_label)
-        type_layout.addWidget(self.type_input, 1)   
+        type_layout.addWidget(self.type_input, 1)
         layout.addLayout(type_layout)
-        
-        # Add spacer
+
         layout.addSpacing(10)
-        
-        # Material lines reference layers section
+
+        # Reference section
         ref_label = QLabel("Material lines reference layers")
         ref_label.setStyleSheet("font-weight: bold;")
         layout.addWidget(ref_label)
-        
-        # Radio buttons section
+
+        # Radio buttons
         self.from_another_radio = QRadioButton("Material Line referring from Baselines")
         self.material_layer_radio = QRadioButton("Material Line referring from Material layer")
-        
-        # Set default selection to Material layer
         self.material_layer_radio.setChecked(True)
-        
-        # Connect radio buttons to update UI visibility
         self.from_another_radio.toggled.connect(self.update_ui_visibility)
         self.material_layer_radio.toggled.connect(self.update_ui_visibility)
-        
-        # Create button group
-        self.ref_layer_group = QButtonGroup()
-        self.ref_layer_group.addButton(self.from_another_radio)
-        self.ref_layer_group.addButton(self.material_layer_radio)
-        
-        # Add radio buttons to layout
+
         radio_layout = QVBoxLayout()
-        radio_layout.setSpacing(8)
         radio_layout.addWidget(self.from_another_radio)
         radio_layout.addWidget(self.material_layer_radio)
         layout.addLayout(radio_layout)
-        
-        # Add spacer
+
         layout.addSpacing(15)
-        
-        # Select Reference layer (dropdown) - hidden by default
+
+        # Reference Baseline (only visible when "from Baselines" is selected)
         self.ref_layer_layout = QHBoxLayout()
         ref_layer_label = QLabel("Select Reference Baseline:")
         ref_layer_label.setFixedWidth(150)
         self.ref_layer_combo = QComboBox()
-        self.ref_layer_combo.addItems(["None", "Layer 1", "Layer 2", "Layer 3", "Layer 4", "Layer 5"])
+        self.ref_layer_combo.addItem("None")
         self.ref_layer_layout.addWidget(ref_layer_label)
         self.ref_layer_layout.addWidget(self.ref_layer_combo, 1)
-        
-        # Create container widget for reference layer
         self.ref_layer_widget = QWidget()
         self.ref_layer_widget.setLayout(self.ref_layer_layout)
         self.ref_layer_widget.setVisible(False)
         layout.addWidget(self.ref_layer_widget)
-        
-        # Select Reference line (dropdown) - visible by default
+
+        # Reference Material Line
         self.ref_line_layout = QHBoxLayout()
         ref_line_label = QLabel("Select Reference Material line:")
         ref_line_label.setFixedWidth(150)
         self.ref_line_combo = QComboBox()
-        self.ref_line_combo.addItems(["None", "Line 1", "Line 2", "Line 3", "Line 4", "Line 5"])
+        self.ref_line_combo.addItems(["None"])  # Will be populated dynamically if needed
         self.ref_line_layout.addWidget(ref_line_label)
         self.ref_line_layout.addWidget(self.ref_line_combo, 1)
-        
-        # Create container widget for reference line
         self.ref_line_widget = QWidget()
         self.ref_line_widget.setLayout(self.ref_line_layout)
         self.ref_line_widget.setVisible(True)
         layout.addWidget(self.ref_line_widget)
-        
-        # Add spacer
+
         layout.addSpacing(15)
-        
-        # Define thickness section
-        thickness_label = QLabel("Define thickness.")
+
+        # Thickness section
+        thickness_label = QLabel("Define thickness")
         thickness_label.setStyleSheet("font-weight: bold;")
         layout.addWidget(thickness_label)
-        
-        # Initial Filling thickness
+
         initial_layout = QHBoxLayout()
         initial_label = QLabel("Initial Filling thickness (m):")
         initial_label.setFixedWidth(200)
         self.initial_spin = QDoubleSpinBox()
-        self.initial_spin.setRange(0.0, 1000.0)
+        self.initial_spin.setRange(0.0, 10000.0)
         self.initial_spin.setValue(0.0)
-        self.initial_spin.setSingleStep(1.0)
+        self.initial_spin.setSingleStep(0.1)
         self.initial_spin.setSuffix(" m")
         initial_layout.addWidget(initial_label)
         initial_layout.addWidget(self.initial_spin, 1)
         layout.addLayout(initial_layout)
-        
-        # Final Compressed thickness
+
         final_layout = QHBoxLayout()
         final_label = QLabel("Final Compressed thickness (m):")
         final_label.setFixedWidth(200)
         self.final_spin = QDoubleSpinBox()
-        self.final_spin.setRange(0.0, 1000.0)
+        self.final_spin.setRange(0.0, 10000.0)
         self.final_spin.setValue(0.0)
-        self.final_spin.setSingleStep(1.0)
+        self.final_spin.setSingleStep(0.1)
         self.final_spin.setSuffix(" m")
         final_layout.addWidget(final_label)
         final_layout.addWidget(self.final_spin, 1)
         layout.addLayout(final_layout)
-        
-        # Add spacer
+
         layout.addStretch()
-        
+
         # Save Button
         save_button = QPushButton("Save")
         save_button.setFixedSize(100, 35)
@@ -905,78 +882,170 @@ class MaterialLineDialog(QDialog):
             QPushButton:hover { background-color: #005A9E; }
             QPushButton:pressed { background-color: #004578; }
         """)
-        save_button.clicked.connect(self.accept)
-        
-        # Center the save button
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(save_button)
-        button_layout.addStretch()
-        layout.addLayout(button_layout)
-    
+        save_button.clicked.connect(self.on_save)
+        layout.addWidget(save_button, alignment=Qt.AlignCenter)
+
+    def on_save(self):
+        material_name = self.name_input.text().strip()
+        if not material_name:
+            QMessageBox.warning(self, "Invalid Name", "Please enter a valid material line name.")
+            return
+
+        material_folder = os.path.join(self.construction_layer_path, material_name)
+        if os.path.exists(material_folder):
+            QMessageBox.warning(self, "Folder Exists", f"A material line folder named '{material_name}' already exists.")
+            return
+
+        try:
+            os.makedirs(material_folder)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to create folder: {str(e)}")
+            return
+
+        config_data = {
+            "worksheet_name": getattr(self.parent_app, 'current_worksheet_name', "Unknown"),
+            "project_name": getattr(self.parent_app, 'current_project_name', "Unknown"),
+            "created_by": getattr(self.parent_app, 'current_user', "guest"),
+            "created_at": datetime.now().isoformat(),
+            "material_line": {
+                "name": material_name,
+                "material_type": self.type_input.text().strip(),
+                "from_another": self.from_another_radio.isChecked(),
+                "ref_layer": self.ref_layer_combo.currentText() if self.from_another_radio.isChecked() else "",
+                "ref_line": self.ref_line_combo.currentText() if self.material_layer_radio.isChecked() else "",
+                "initial_filling_m": self.initial_spin.value(),
+                "final_compressed_m": self.final_spin.value()
+            }
+        }
+
+        config_path = os.path.join(material_folder, "material_line_config.txt")
+        try:
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(config_data, f, indent=4, ensure_ascii=False)
+            QMessageBox.information(self, "Success", f"Material line '{material_name}' saved successfully!")
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Save Failed", f"Failed to save config: {str(e)}")
+
+    def load_available_baselines(self):
+        """
+        Load ONLY the selected baselines from the construction layer config.
+        Fixed to use absolute paths reliably on Windows with spaces.
+        """
+        self.ref_layer_combo.clear()
+        self.ref_layer_combo.addItem("None")
+
+        if not self.construction_layer_path or not os.path.exists(self.construction_layer_path):
+            self.ref_layer_combo.addItem("Construction layer path not available")
+            return
+
+        config_path = os.path.join(self.construction_layer_path, "Construction_Layer_config.txt")
+        if not os.path.exists(config_path):
+            self.ref_layer_combo.addItem("Construction_Layer_config.txt not found")
+            return
+
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+            selected_baselines = config.get("base_lines_reference", [])
+            reference_layer_2d = config.get("reference_layer_2d")
+
+            if not selected_baselines:
+                self.ref_layer_combo.addItem("No baselines selected in construction layer")
+                return
+
+            if not reference_layer_2d:
+                self.ref_layer_combo.addItem("No reference design layer defined")
+                return
+
+            # === FINAL ROBUST PATH CONSTRUCTION ===
+            # Start from construction layer folder and go up to worksheet root
+            worksheet_root = os.path.abspath(
+                os.path.join(self.construction_layer_path, "..", "..")
+            )
+            # worksheet_root = E:\3D_Tool\user\worksheets\Road Design - Charholi
+
+            designs_folder = os.path.join(worksheet_root, "designs")
+            design_layer_path = os.path.join(designs_folder, reference_layer_2d)
+
+            # Debug: You can temporarily uncomment these to see paths in console
+            # print("Worksheet root:", worksheet_root)
+            # print("Designs folder:", designs_folder)
+            # print("Target layer path:", design_layer_path)
+
+            if not os.path.exists(design_layer_path):
+                self.ref_layer_combo.addItem(f"Design layer folder not found: {reference_layer_2d}")
+                self.ref_layer_combo.addItem(f"Checked path: {design_layer_path}")
+                return
+            # === END FIX ===
+
+            found_count = 0
+            for baseline_filename in selected_baselines:
+                file_path = os.path.join(design_layer_path, baseline_filename)
+                if os.path.exists(file_path):
+                    # Clean display name (remove "_baseline.json")
+                    display_name = os.path.basename(baseline_filename).replace("_baseline.json", "")
+                    self.ref_layer_combo.addItem(display_name)
+                    found_count += 1
+                else:
+                    self.ref_layer_combo.addItem(f"[Missing] {os.path.basename(baseline_filename)}")
+
+            if found_count == 0:
+                self.ref_layer_combo.addItem("Selected baselines not found in design layer")
+            elif found_count > 0:
+                # Optional success indicator
+                pass
+
+        except Exception as e:
+            self.ref_layer_combo.addItem(f"Error loading config: {str(e)}")
+
     def update_ui_visibility(self):
-        """Show/hide dropdowns based on radio button selection"""
         if self.from_another_radio.isChecked():
             self.ref_layer_widget.setVisible(True)
             self.ref_line_widget.setVisible(False)
-        else:  # Material layer is checked
+        else:
             self.ref_layer_widget.setVisible(False)
             self.ref_line_widget.setVisible(True)
-    
+
     def load_material_data(self):
-        """Load material data into form fields"""
-        if self.material_data:
-            self.name_input.setText(self.material_data.get('name', ''))
-            self.type_input.setText(self.material_data.get('material_type', ''))
-            
-            # Set radio button states
-            from_another = self.material_data.get('from_another', False)
-            material_layer = self.material_data.get('material_layer', True)
-            
-            if from_another:
-                self.from_another_radio.setChecked(True)
-            else:
-                self.material_layer_radio.setChecked(True)
-            
-            # Set dropdown values
-            ref_layer = self.material_data.get('ref_layer', '')
-            if ref_layer:
-                index = self.ref_layer_combo.findText(ref_layer)
-                if index >= 0:
-                    self.ref_layer_combo.setCurrentIndex(index)
-            
-            ref_line = self.material_data.get('ref_line', '')
-            if ref_line:
-                index = self.ref_line_combo.findText(ref_line)
-                if index >= 0:
-                    self.ref_line_combo.setCurrentIndex(index)
-            
-            # Set thickness values
-            initial_filling = self.material_data.get('initial_filling', 0.0)
-            final_compressed = self.material_data.get('final_compressed', 0.0)
-            
-            # If values are in meters (old format), convert to mm
-            if initial_filling < 1.0 and initial_filling > 0.0:
-                initial_filling *= 1000
-            if final_compressed < 1.0 and final_compressed > 0.0:
-                final_compressed *= 1000
-                
-            self.initial_spin.setValue(initial_filling)
-            self.final_spin.setValue(final_compressed)
-    
+        if not self.material_data:
+            return
+        self.name_input.setText(self.material_data.get('name', ''))
+        self.type_input.setText(self.material_data.get('material_type', ''))
+        from_another = self.material_data.get('from_another', False)
+        if from_another:
+            self.from_another_radio.setChecked(True)
+        else:
+            self.material_layer_radio.setChecked(True)
+
+        ref_layer = self.material_data.get('ref_layer', 'None')
+        index = self.ref_layer_combo.findText(ref_layer)
+        if index >= 0:
+            self.ref_layer_combo.setCurrentIndex(index)
+
+        ref_line = self.material_data.get('ref_line', 'None')
+        index = self.ref_line_combo.findText(ref_line)
+        if index >= 0:
+            self.ref_line_combo.setCurrentIndex(index)
+
+        self.initial_spin.setValue(self.material_data.get('initial_filling', 0.0))
+        self.final_spin.setValue(self.material_data.get('final_compressed', 0.0))
+
     def get_material_data(self):
-        """Return the material data entered in the dialog"""
         return {
-            'name': self.name_input.text(),
-            'material_type': self.type_input.text(),
+            'name': self.name_input.text().strip(),
+            'material_type': self.type_input.text().strip(),
             'from_another': self.from_another_radio.isChecked(),
             'material_layer': self.material_layer_radio.isChecked(),
             'ref_layer': self.ref_layer_combo.currentText() if self.from_another_radio.isChecked() else '',
             'ref_line': self.ref_line_combo.currentText() if self.material_layer_radio.isChecked() else '',
             'initial_filling': self.initial_spin.value(),
-            'final_compressed': self.final_spin.value()
+            'final_compressed': self.final_spin.value(),
         }
     
+
+
 # ==========================================================================================================================================
 #                                                    ** MEASUREMENT DIALOG **
 # ==========================================================================================================================================
@@ -1143,7 +1212,6 @@ class MeasurementDialog(QDialog):
             return "presized_vertical"
         return None
     
-
 # ===========================================================================================================================
 # DESIGN NEW LAYER DIALOG – With Dynamic Dropdown Based on Road/Bridge Selection + NO OVERWRITE
 # ===========================================================================================================================
@@ -1447,7 +1515,7 @@ class HelpDialog(QDialog):
 
 
 # ===========================================================================================================================
-# UPDATED DIALOG: Construction Layer Creation Dialog (with cleanup on OK)
+# FINAL UPDATED: Construction Layer Creation Dialog (Multiple Baseline Selection + Preview)
 # ===========================================================================================================================
 class ConstructionNewDialog(QDialog):
     def __init__(self, parent=None):
@@ -1457,6 +1525,12 @@ class ConstructionNewDialog(QDialog):
         self.parent = parent
        
         self.current_worksheet_path = None
+
+        # Initialize preview-related attributes EARLY to avoid AttributeError
+        self.preview_artists = []  # Temporary artists for live preview
+        self.selected_baseline_data = []  # List of (data_dict, color, baseline_key, filename)
+        self.preview_colors = ["gray", "blue", "green", "orange", "purple", "brown", "pink", "olive", "cyan"]
+
         self.setStyleSheet("""
             QDialog {
                 background-color: #F5F5F5;
@@ -1476,7 +1550,14 @@ class ConstructionNewDialog(QDialog):
                 font-weight: bold;
                 min-width: 90px;
             }
+            QListWidget {
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                padding: 5px;
+                font-size: 13px;
+            }
         """)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
@@ -1511,18 +1592,19 @@ class ConstructionNewDialog(QDialog):
         self.ref_layer_combo.setEditable(False)
         layout.addWidget(self.ref_layer_combo)
         
-        # Base Lines Dropdown
-        layout.addWidget(QLabel("2D Layer refer to Base lines:"))
-        self.base_lines_combo = QComboBox()
-        self.base_lines_combo.setEditable(False)
-        layout.addWidget(self.base_lines_combo)
+        # Base Lines - Multi-Select List
+        layout.addWidget(QLabel("2D Layer refer to Base lines (select one or more):"))
+        self.base_lines_list = QListWidget()
+        self.base_lines_list.setSelectionMode(QListWidget.MultiSelection)
+        self.base_lines_list.setMinimumHeight(120)
+        layout.addWidget(self.base_lines_list)
         
         # Initial load
         self.load_design_layers()
         
         # Connect signals
         self.ref_layer_combo.currentIndexChanged.connect(self.on_reference_layer_changed)
-        self.base_lines_combo.currentIndexChanged.connect(self.on_baseline_selected)
+        self.base_lines_list.itemSelectionChanged.connect(self.on_baseline_selection_changed)
         
         # Buttons
         btn_layout = QHBoxLayout()
@@ -1536,11 +1618,6 @@ class ConstructionNewDialog(QDialog):
         btn_layout.addWidget(self.ok_button)
         btn_layout.addWidget(self.cancel_button)
         layout.addLayout(btn_layout)
-
-        # Store loaded baseline data
-        self.loaded_baseline_data = None
-        self.loaded_baseline_color = "gray"
-        self.loaded_baseline_type = None
 
     def set_current_worksheet_path(self, path):
         self.current_worksheet_path = path
@@ -1573,141 +1650,149 @@ class ConstructionNewDialog(QDialog):
     
     def get_json_baselines_in_layer(self, design_layer_name):
         if not design_layer_name or design_layer_name in ("None", "(No designs folder)", "(No design layers found)"):
-            return ["None"]
+            return []
         designs_path = self.get_designs_path()
         if not designs_path:
-            return ["None"]
+            return []
         layer_path = os.path.join(designs_path, design_layer_name)
         if not os.path.exists(layer_path):
-            return ["None"]
+            return []
         try:
             json_files = [
                 name for name in os.listdir(layer_path)
                 if name.lower().endswith('.json') and os.path.isfile(os.path.join(layer_path, name))
             ]
             json_files.sort()
-            return ["None"] + json_files
+            return json_files
         except Exception:
-            return ["None"]
+            return []
 
     def on_reference_layer_changed(self):
         ref_layer = self.ref_layer_combo.currentText()
         json_baselines = self.get_json_baselines_in_layer(ref_layer)
-        current = self.base_lines_combo.currentText()
-        self.base_lines_combo.clear()
-        self.base_lines_combo.addItems(json_baselines)
-        if current in json_baselines:
-            self.base_lines_combo.setCurrentText(current)
+        
+        self.base_lines_list.clear()
+        if json_baselines:
+            self.base_lines_list.addItems(json_baselines)
         else:
-            self.base_lines_combo.setCurrentIndex(0)
+            self.base_lines_list.addItem("(No baseline files found)")
 
-    def on_baseline_selected(self):
-        selected_json = self.base_lines_combo.currentText()
-        if selected_json in ("None", ""):
-            self.loaded_baseline_data = None
+        # Clear any existing preview
+        self.clear_preview_lines()
+        self.selected_baseline_data.clear()
+
+    def clear_preview_lines(self):
+        for artist in self.preview_artists:
+            try:
+                artist.remove()
+            except:
+                pass
+        self.preview_artists.clear()
+        if hasattr(self.parent, 'canvas'):
+            self.parent.canvas.draw_idle()
+
+    def on_baseline_selection_changed(self):
+        self.clear_preview_lines()
+        self.selected_baseline_data.clear()
+
+        selected_items = self.base_lines_list.selectedItems()
+        if not selected_items:
+            self.parent.message_text.append("No baselines selected for preview.")
             return
 
         ref_layer = self.ref_layer_combo.currentText()
         if ref_layer in ("None", "(No designs folder)", "(No design layers found)"):
-            self.loaded_baseline_data = None
             return
 
         designs_path = self.get_designs_path()
         if not designs_path:
-            self.loaded_baseline_data = None
             return
 
-        json_path = os.path.join(designs_path, ref_layer, selected_json)
-        if not os.path.exists(json_path):
-            QMessageBox.warning(self, "File Not Found", f"Baseline file not found:\n{json_path}")
-            self.loaded_baseline_data = None
+        color_idx = 0
+        for item in selected_items:
+            json_file = item.text()
+            if json_file.startswith("("):  # Skip placeholder items
+                continue
+
+            json_path = os.path.join(designs_path, ref_layer, json_file)
+            if not os.path.exists(json_path):
+                continue
+
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                color = data.get("color", self.preview_colors[color_idx % len(self.preview_colors)])
+                baseline_key = data.get("baseline_key", json_file.replace("_baseline.json", ""))
+                baseline_type = data.get("baseline_type", "Baseline")
+
+                # Store for later use (on OK)
+                self.selected_baseline_data.append((data, color, baseline_key, json_file))
+
+                # Plot dotted preview
+                all_x = []
+                all_y = []
+                for poly in data.get("polylines", []):
+                    poly_x = [pt["chainage_m"] for pt in poly.get("points", [])]
+                    poly_y = [pt["relative_elevation_m"] for pt in poly.get("points", [])]
+                    if poly_x:
+                        all_x.extend(poly_x)
+                        all_y.extend(poly_y)
+
+                if all_x:
+                    artist, = self.parent.ax.plot(
+                        all_x, all_y,
+                        color=color,
+                        linestyle=':',
+                        linewidth=3,
+                        alpha=0.8,
+                        label=f"Ref: {baseline_type} ({json_file})",
+                        zorder=5
+                    )
+                    self.preview_artists.append(artist)
+
+                color_idx += 1
+
+            except Exception as e:
+                QMessageBox.warning(self, "Load Error", f"Failed to load {json_file}:\n{str(e)}")
+
+        self.parent.canvas.draw_idle()
+        self.parent.message_text.append(f"Preview: {len(selected_items)} baseline(s) selected (dotted lines)")
+
+    def validate_and_accept(self):
+        layer_name = self.name_edit.text().strip()
+        if not layer_name:
+            QMessageBox.warning(self, "Input Required", "Please enter a layer name.")
             return
 
-        try:
-            with open(json_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+        construction_base = os.path.join(r"E:\3D_Tool\user\worksheets", self.parent.current_worksheet_name, "construction")
+        if os.path.exists(os.path.join(construction_base, layer_name)):
+            QMessageBox.warning(self, "Name Exists",
+                                "A construction layer with this name already exists.\nPlease enter another name.")
+            return
 
-            self.loaded_baseline_data = data
-            self.loaded_baseline_color = data.get("color", "gray")
-            self.loaded_baseline_type = data.get("baseline_key", selected_json.replace("_baseline.json", ""))
-
-            # Update zero line
-            zero_start = np.array(data["zero_line_start"])
-            zero_end = np.array(data["zero_line_end"])
-            zero_start_z = float(data.get("zero_start_elevation", 0.0))
-            total_distance = float(data.get("total_chainage_length", 0.0))
-
-            if total_distance <= 0:
-                QMessageBox.warning(self, "Invalid Data", "Total chainage length is invalid.")
-                return
-
-            zero_start_km = None
-            zero_interval = None
-            if "point1" in data and data["point1"].get("km") is not None:
-                zero_start_km = int(data["point1"]["km"])
-            if "interval_m" in data:
-                zero_interval = float(data["interval_m"])
-
-            if zero_start_km is None or zero_interval is None:
-                zero_config_path = os.path.join(designs_path, ref_layer, "zero_line_config.json")
-                if os.path.exists(zero_config_path):
+        # Clear standard baseline types
+        baseline_types_to_clear = [
+            'surface', 'construction', 'road_surface',
+            'deck_line', 'projection_line', 'material'
+        ]
+        for ltype in baseline_types_to_clear:
+            if ltype in self.parent.line_types:
+                for artist in self.parent.line_types[ltype]['artists']:
                     try:
-                        with open(zero_config_path, 'r', encoding='utf-8') as zf:
-                            zdata = json.load(zf)
-                        if zero_start_km is None and zdata["point1"].get("km") is not None:
-                            zero_start_km = int(zdata["point1"]["km"])
-                        if zero_interval is None:
-                            zero_interval = float(zdata["interval_m"])
+                        artist.remove()
                     except:
                         pass
+                self.parent.line_types[ltype]['artists'].clear()
+                self.parent.line_types[ltype]['polylines'].clear()
 
-            if zero_interval is None or zero_interval <= 0:
-                zero_interval = 100.0 if total_distance > 5000 else 50.0 if total_distance > 1000 else 20.0
-
-            zero_changed = (
-                not self.parent.zero_line_set or
-                not np.allclose(self.parent.zero_start_point, zero_start, atol=1e-4) or
-                not np.allclose(self.parent.zero_end_point, zero_end, atol=1e-4) or
-                abs(self.parent.total_distance - total_distance) > 1e-3
-            )
-
-            if zero_changed:
-                self.parent.zero_start_point = zero_start
-                self.parent.zero_end_point = zero_end
-                self.parent.zero_start_z = zero_start_z
-                self.parent.total_distance = total_distance
-                self.parent.original_total_distance = total_distance
-                self.parent.zero_line_set = True
-                self.parent.zero_start_km = zero_start_km
-                self.parent.zero_interval = zero_interval
-
-                if hasattr(self.parent, 'zero_graph_line') and self.parent.zero_graph_line:
-                    try:
-                        self.parent.zero_graph_line.remove()
-                    except:
-                        pass
-                self.parent.zero_graph_line, = self.parent.ax.plot(
-                    [0, total_distance], [0, 0],
-                    color='purple', linewidth=3, label='Zero Line', zorder=10
-                )
-
-                self.parent.zero_line.blockSignals(True)
-                self.parent.zero_line.setChecked(True)
-                self.parent.zero_line.blockSignals(False)
-                self.parent.scale_section.setVisible(True)
-                self.parent.update_chainage_ticks()
-
-                self.parent.message_text.append(
-                    f"Zero line updated from '{selected_json}' (Length: {total_distance:.1f}m)"
-                )
-
-            # Plot selected baseline as dotted reference (preview only)
-            baseline_key = data.get("baseline_key", selected_json.replace("_baseline.json", ""))
-            color = data.get("color", "gray")
-
+        # Re-plot ALL selected reference baselines permanently (dotted)
+        self.clear_preview_lines()  # Remove temporary ones
+        for data, color, baseline_key, filename in self.selected_baseline_data:
             if baseline_key not in self.parent.line_types:
                 self.parent.line_types[baseline_key] = {'color': color, 'polylines': [], 'artists': []}
 
+            # Clear any old
             for artist in self.parent.line_types[baseline_key]['artists']:
                 try:
                     artist.remove()
@@ -1733,97 +1818,16 @@ class ConstructionNewDialog(QDialog):
                     linestyle=':',
                     linewidth=3,
                     alpha=0.8,
-                    label=f"Ref: {data.get('baseline_type', 'Baseline')}",
                     zorder=5
                 )
                 self.parent.line_types[baseline_key]['artists'].append(ref_artist)
 
-            self.parent.canvas.draw_idle()
-            self.parent.message_text.append(f"Preview: {data.get('baseline_type', 'Baseline')} (dotted)")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Load Error", f"Failed to load baseline:\n{str(e)}")
-            self.parent.message_text.append(f"Baseline load error: {str(e)}")
-
-    # =========================================================================================================================================
-    def validate_and_accept(self):
-        layer_name = self.name_edit.text().strip()
-        if not layer_name:
-            QMessageBox.warning(self, "Input Required", "Please enter a layer name.")
-            return
-
-        base_dir = r"E:\3D_Tool\user\worksheets"
-        construction_base = os.path.join(base_dir, self.parent.current_worksheet_name, "construction")
-        if os.path.exists(os.path.join(construction_base, layer_name)):
-            QMessageBox.warning(self, "Name Exists",
-                                "A construction layer with this name already exists.\nPlease enter another name.")
-            return
-
-        # =====================================================================
-        # CRITICAL: Clear ALL drawn baselines except zero line and selected ref
-        # =====================================================================
-        # Remove all artists from standard baseline types
-        baseline_types_to_clear = [
-            'surface', 'construction', 'road_surface',
-            'deck_line', 'projection_line', 'material'
-        ]
-
-        for ltype in baseline_types_to_clear:
-            if ltype in self.parent.line_types:
-                for artist in self.parent.line_types[ltype]['artists']:
-                    try:
-                        artist.remove()
-                    except:
-                        pass
-                self.parent.line_types[ltype]['artists'].clear()
-                self.parent.line_types[ltype]['polylines'].clear()
-
-        # Re-plot only the selected reference baseline (dotted) if available
-        if self.loaded_baseline_data:
-            ltype = self.loaded_baseline_type
-            color = self.loaded_baseline_color
-
-            if ltype not in self.parent.line_types:
-                self.parent.line_types[ltype] = {'color': color, 'polylines': [], 'artists': []}
-
-            # Clear existing first
-            for artist in self.parent.line_types[ltype]['artists']:
-                try:
-                    artist.remove()
-                except:
-                    pass
-            self.parent.line_types[ltype]['artists'].clear()
-            self.parent.line_types[ltype]['polylines'].clear()
-
-            all_x = []
-            all_y = []
-            for poly in self.loaded_baseline_data.get("polylines", []):
-                poly_x = [pt["chainage_m"] for pt in poly.get("points", [])]
-                poly_y = [pt["relative_elevation_m"] for pt in poly.get("points", [])]
-                if poly_x:
-                    all_x.extend(poly_x)
-                    all_y.extend(poly_y)
-                    self.parent.line_types[ltype]['polylines'].append(list(zip(poly_x, poly_y)))
-
-            if all_x:
-                ref_artist, = self.parent.ax.plot(
-                    all_x, all_y,
-                    color=color,
-                    linestyle=':',
-                    linewidth=3,
-                    alpha=0.8,
-                    zorder=5
-                )
-                self.parent.line_types[ltype]['artists'].append(ref_artist)
-
-        # Redraw canvas
         self.parent.canvas.draw_idle()
 
-        # =====================================================================
-        # Create 3D base plane from selected baseline
-        # =====================================================================
-        if self.loaded_baseline_data:
-            width = float(self.loaded_baseline_data.get("width_meters", 10.0))
+        # Create 3D base plane from FIRST selected baseline (if any)
+        if self.selected_baseline_data:
+            first_data = self.selected_baseline_data[0][0]
+            width = float(first_data.get("width_meters", 10.0))
             half_width = width / 2.0
 
             if not hasattr(self.parent, 'construction_base_actors'):
@@ -1832,13 +1836,13 @@ class ConstructionNewDialog(QDialog):
                 self.parent.renderer.RemoveActor(actor)
             self.parent.construction_base_actors.clear()
 
-            zero_start = np.array(self.loaded_baseline_data["zero_line_start"])
-            zero_end = np.array(self.loaded_baseline_data["zero_line_end"])
+            zero_start = np.array(first_data["zero_line_start"])
+            zero_end = np.array(first_data["zero_line_end"])
             zero_dir_vec = zero_end - zero_start
             zero_length = np.linalg.norm(zero_dir_vec)
-            ref_z = float(self.loaded_baseline_data.get("zero_start_elevation", 0.0))
+            ref_z = float(first_data.get("zero_start_elevation", 0.0))
 
-            ltype = self.loaded_baseline_type
+            ltype = self.selected_baseline_data[0][2]
             plane_colors = {
                 'surface': (0.0, 0.8, 0.0, 0.4),
                 'construction': (1.0, 0.0, 0.0, 0.4),
@@ -1851,7 +1855,7 @@ class ConstructionNewDialog(QDialog):
             color_rgb = rgba[:3]
             opacity = rgba[3]
 
-            for poly in self.loaded_baseline_data.get("polylines", []):
+            for poly in first_data.get("polylines", []):
                 points_2d = poly.get("points", [])
                 if len(points_2d) < 2:
                     continue
@@ -1918,19 +1922,23 @@ class ConstructionNewDialog(QDialog):
                     self.parent.construction_base_actors.append(actor)
 
             self.parent.vtk_widget.GetRenderWindow().Render()
-            self.parent.message_text.append(f"Base plane created from '{self.loaded_baseline_type}' (width: {width:.2f}m)")
+            self.parent.message_text.append(f"Base plane created from first selected baseline (width: {width:.2f}m)")
 
         self.accept()
 
     def get_data(self):
         ref_layer = self.ref_layer_combo.currentText()
-        base_line_json = self.base_lines_combo.currentText()
+        selected_baselines = [
+            item.text() for item in self.base_lines_list.selectedItems()
+            if not item.text().startswith("(")
+        ]
+        
         return {
             'layer_name': self.name_edit.text().strip(),
             'is_road': self.road_radio.isChecked(),
             'is_bridge': self.bridge_radio.isChecked(),
             'reference_layer': None if ref_layer in ("None", "(No designs folder)", "(No design layers found)") else ref_layer,
-            'base_lines_layer': None if base_line_json == "None" else base_line_json
+            'base_lines_layer': selected_baselines  # List of selected JSON files
         }
 
 # ===========================================================================================================================
@@ -2446,7 +2454,7 @@ class ExistingWorksheetDialog(QDialog):
             self.title_label.setText("Select an Existing Worksheet")
 
     # ------------------------------------------------------------------
-    # Final open
+    # Final open - THIS IS WHERE WE SAVE THE selected_config.txt
     # ------------------------------------------------------------------
     def final_open(self):
         if not self.page3.isVisible():
@@ -2459,6 +2467,25 @@ class ExistingWorksheetDialog(QDialog):
             return
 
         self.selected_layer_name = item.text()
+
+        # Save selected config in worksheet root folder (overwrites existing)
+        config_data = {
+            "worksheet": self.selected_worksheet_data.get("worksheet_name",
+                                                        os.path.basename(self.selected_worksheet_folder)),
+            "folder": self.selected_subfolder_type,
+            "layer": self.selected_layer_name,
+            "last_selected": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        config_path = os.path.join(self.selected_worksheet_folder, "selected_config.txt")
+
+        try:
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(config_data, f, indent=4)
+            print(f"Updated {config_path}")
+        except Exception as e:
+            print(f"Failed to save {config_path}: {e}")
+
         self.accept()
 
     # ------------------------------------------------------------------
@@ -2481,8 +2508,8 @@ class ExistingWorksheetDialog(QDialog):
             "layer_name": self.selected_layer_name,
             "full_layer_path": full_path
         }
-    
-    
+
+
 # =================================================================================================================================================================
 #                                                   ** Updated WorksheetNewDialog (Layer Name - No Fallback) **
 # =================================================================================================================================================================
@@ -2932,3 +2959,172 @@ class RoadPlaneWidthDialog(QDialog):
 
     def get_width(self):
         return self.width_spin.value()
+
+
+# =======================================================================================================================================
+# ADD THIS NEW DIALOG CLASS TO dialogs.py (or inline if preferred)
+# =======================================================================================================================================
+class MaterialSegmentDialog(QDialog):
+    def __init__(self, from_chainage=None, to_chainage=None, material_thickness=None, width=None, after_rolling=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Material Segment Configuration")
+        self.setModal(True)
+        self.setMinimumWidth(400)
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #e6e6fa, stop:1 #e6e6fa);
+                border-radius: 20px;
+            }
+            QLabel {
+                color: black;
+                font-weight: 500;
+            }
+            QGroupBox {
+                border: 2px solid #7B1FA2;
+                border-radius: 10px;
+                margin-top: 15px;
+                padding-top: 10px;
+                font-weight: bold;
+                color: #4A148C;
+                background-color: rgba(255,255,255,0.3);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 3px 8px;
+                font-size: 12px;
+            }
+            QLineEdit {
+                border: 2px solid #9C27B0;
+                border-radius: 8px;
+                padding: 8px;
+                background-color: white;
+                selection-background-color: #CE93D8;
+                font-weight: 500;
+            }
+            QLineEdit:focus {
+                border: 2px solid #7B1FA2;
+                background-color: #F3E5F5;
+            }
+            QPushButton {
+                border-radius: 20px;
+                padding: 10px;
+                font-weight: bold;
+                min-width: 120px;
+                border: none;
+            }
+            QPushButton#okBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #9C27B0, stop:1 #6A1B9A);
+                color: white;
+            }
+            QPushButton#okBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #AB47BC, stop:1 #4A148C);
+            }
+            QPushButton#okBtn:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #6A1B9A, stop:1 #4A148C);
+                padding: 12px 10px 8px 10px;
+            }
+            QPushButton#cancelBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #E1BEE7, stop:1 #CE93D8);
+                color: #333333;
+            }
+            QPushButton#cancelBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #D1C4E9, stop:1 #BA68C8);
+            }
+            QPushButton#cancelBtn:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #CE93D8, stop:1 #8E24AA);
+                padding: 12px 10px 8px 10px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+
+        # Chainage Group
+        chainage_group = QGroupBox("Chainage")
+        chainage_layout = QHBoxLayout(chainage_group)
+        chainage_layout.addWidget(QLabel("From chainage:"))
+        self.from_chainage_edit = QLineEdit(str(from_chainage) if from_chainage else "")
+        chainage_layout.addWidget(self.from_chainage_edit)
+        chainage_layout.addWidget(QLabel("To chainage:"))
+        self.to_chainage_edit = QLineEdit(str(to_chainage) if to_chainage else "")
+        chainage_layout.addWidget(self.to_chainage_edit)
+        layout.addWidget(chainage_group)
+
+        # Material Properties Group
+        material_group = QGroupBox("Material Properties")
+        material_layout = QGridLayout(material_group)
+        material_layout.addWidget(QLabel("Material Thickness (m):"), 0, 0)
+        self.thickness_edit = QLineEdit(str(material_thickness) if material_thickness else "")
+        material_layout.addWidget(self.thickness_edit, 0, 1)
+        material_layout.addWidget(QLabel("Width (m):"), 1, 0)
+        self.width_edit = QLineEdit(str(width) if width else "")
+        material_layout.addWidget(self.width_edit, 1, 1)
+        layout.addWidget(material_group)
+
+        # After Rolling Group
+        rolling_group = QGroupBox("After Rolling")
+        rolling_layout = QHBoxLayout(rolling_group)
+        rolling_layout.addWidget(QLabel("Thickness (m):"))
+        self.after_rolling_edit = QLineEdit(str(after_rolling) if after_rolling else "")
+        rolling_layout.addWidget(self.after_rolling_edit)
+        layout.addWidget(rolling_group)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.setObjectName("okBtn")
+        ok_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(ok_btn)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("cancelBtn")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+        self.setLayout(layout)
+
+
+    def get_data(self):
+        try:
+            def parse_chainage_to_meters(s):
+                if not s:
+                    return None
+                s = s.split('(')[0].strip()  # remove approx note
+                s = s.replace(' ', '')
+                if '+' in s:
+                    km_str, interval_str = s.split('+')
+                    km = int(km_str)
+                    interval = int(interval_str)
+                    return km * 1000 + interval
+                else:
+                    return float(s)
+
+            from_m = parse_chainage_to_meters(self.from_chainage_edit.text().strip())
+            to_m   = parse_chainage_to_meters(self.to_chainage_edit.text().strip())
+
+            thickness = float(self.thickness_edit.text().strip() or 0)
+            width     = float(self.width_edit.text().strip() or 0)
+            after_rolling = float(self.after_rolling_edit.text().strip() or 0)
+
+            return {
+                'from_chainage_m': from_m,
+                'to_chainage_m': to_m,
+                'material_thickness_m': thickness,
+                'width_m': width,
+                'after_rolling_thickness_m': after_rolling
+            }
+        except Exception as e:
+            QMessageBox.warning(self, "Input Error",
+                                f"Invalid chainage or number format.\n\nError: {str(e)}")
+            return None
+
+
+
