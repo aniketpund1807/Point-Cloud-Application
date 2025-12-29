@@ -1396,8 +1396,9 @@ class ApplicationUI(QMainWindow):
         self.figure.tight_layout()
 
 
+
         # ---------------------------------------------------------------------
-        # Zoom Controls Toolbar - SIMPLIFIED WORKING VERSION
+        # Zoom Controls Toolbar - UPDATED WITH TOGGLE START/STOP BUTTON
         # ---------------------------------------------------------------------
         zoom_toolbar = QWidget()
         zoom_toolbar.setFixedHeight(40)
@@ -1541,12 +1542,49 @@ class ApplicationUI(QMainWindow):
         """)
         zoom_layout.addWidget(self.autofit_button)
 
-        # Add stretch
+        # === NEW: Toggle Start / Stop Button ===
+        self.start_stop_button = QPushButton("Start")
+        self.start_stop_button.setFixedHeight(30)
+        self.start_stop_button.setCheckable(True)  # Allows toggle state
+        self.start_stop_button.setStyleSheet("""
+            QPushButton {
+                color: white;
+                border: none;
+                border-radius: 3px;
+                font-weight: bold;
+                padding: 0 15px;
+            }
+            QPushButton:checked {
+                background-color: #D32F2F;  /* Red when "Stop" */
+            }
+            QPushButton:!checked {
+                background-color: #4CAF50;  /* Purple when "Start" */
+            }
+            QPushButton:hover:checked {
+                background-color: #B71C1C;
+            }
+            QPushButton:hover:!checked {
+                background-color: #4CAF50;
+            }
+        """)
+        # Optional: connect to your actual start/stop logic here
+        # self.start_stop_button.clicked.connect(self.on_start_stop_clicked)
+        zoom_layout.addWidget(self.start_stop_button)
+
+        # Connect the toggle behavior to update text
+        def on_start_stop_toggled(checked):
+            if checked:
+                self.start_stop_button.setText("Stop")
+            else:
+                self.start_stop_button.setText("Start")
+
+        self.start_stop_button.toggled.connect(on_start_stop_toggled)
+
+        # Add stretch to push everything left
         zoom_layout.addStretch()
 
         # Add zoom toolbar to the layout BEFORE the graph
         bottom_layout.addWidget(zoom_toolbar)
-        
         # Create horizontal layout for line section and canvas
         content_layout_bottom = QHBoxLayout()
         content_layout_bottom.addWidget(self.line_section)

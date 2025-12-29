@@ -3101,14 +3101,19 @@ class MaterialSegmentDialog(QDialog):
                 s = s.replace(' ', '')
                 if '+' in s:
                     km_str, interval_str = s.split('+')
-                    km = int(km_str)
-                    interval = int(interval_str)
-                    return km * 1000 + interval
+                    # km = int(km_str)  # We DON'T add km*1000 here!
+                    interval = float(interval_str)  # Just the interval meters
+                    return interval  # Return only meters along the line (0 to total_distance)
                 else:
-                    return float(s)
+                    # If plain number (e.g., "150.5m")
+                    return float(s.replace('m', ''))
 
             from_m = parse_chainage_to_meters(self.from_chainage_edit.text().strip())
             to_m   = parse_chainage_to_meters(self.to_chainage_edit.text().strip())
+
+            if from_m is None or to_m is None:
+                QMessageBox.warning(self, "Invalid", "Please enter valid chainage.")
+                return None
 
             thickness = float(self.thickness_edit.text().strip() or 0)
             width     = float(self.width_edit.text().strip() or 0)
@@ -3123,7 +3128,7 @@ class MaterialSegmentDialog(QDialog):
             }
         except Exception as e:
             QMessageBox.warning(self, "Input Error",
-                                f"Invalid chainage or number format.\n\nError: {str(e)}")
+                                f"Invalid chainage format. Use KM+Interval like 101+000 or just meters.\nError: {str(e)}")
             return None
 
 

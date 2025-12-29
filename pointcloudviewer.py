@@ -116,6 +116,18 @@ class PointCloudViewer(ApplicationUI):
         self.canvas.setFocusPolicy(Qt.StrongFocus)
         self.canvas.setFocus()  # Optional: give focus automatically
 
+        # Per-baseline width storage (independent for each type)
+        self.baseline_widths = {
+            'surface': 10.0,
+            'construction': 20.0,
+            'road_surface': 10.0,
+            'deck_line': 10.0,
+            'projection_line': 10.0,
+            'material': 10.0,
+        }
+
+
+
         # Connect signals
         self.connect_signals()
 
@@ -814,6 +826,7 @@ class PointCloudViewer(ApplicationUI):
 
             self.canvas.draw()
             self.vtk_widget.GetRenderWindow().Render()
+
 # =======================================================================================================================================
     def open_measurement_dialog(self):
         """Open the Measurement Configuration Dialog when New is clicked"""
@@ -1279,6 +1292,7 @@ class PointCloudViewer(ApplicationUI):
         # Message for new items only
         if edit_index is None:
             self.message_text.append(f"Added material line: {material_data['name']}")
+
 # =======================================================================================================================================
     def edit_existing_material_line(self, index):
         """Edit an existing material line by index"""
@@ -1304,7 +1318,6 @@ class PointCloudViewer(ApplicationUI):
             self.create_material_line_entry(new_material_data, edit_index=index)
             
             self.message_text.append(f"Updated material line: {new_material_data['name']}")
-
 
 # =======================================================================================================================================
     def save_material_data(self):
@@ -1594,9 +1607,6 @@ class PointCloudViewer(ApplicationUI):
         """
         Load only JSON files that are intended to be point clouds (e.g., not baseline or config files).
         """
-        import vtk
-        from vtk.util.numpy_support import numpy_to_vtk
-
         if not hasattr(self, 'vtk_widget') or not self.vtk_widget:
             self.message_text.append("Error: VTK widget not initialized.")
             return False
@@ -1845,17 +1855,175 @@ class PointCloudViewer(ApplicationUI):
         self.canvas.draw_idle()
 
 # ===========================================================================================================================================================
-    def map_baselines_to_3d_planes_from_data(self, loaded_baselines, width):
-        """Regenerate 3D planes from loaded baseline data (same logic as map_baselines_to_3d_planes but from dict)"""
-        if not self.zero_line_set:
+
+    # New method to load baselines from JSON files
+    def load_baselines_from_layer(self):
+        if not self.current_layer_name:
+            QMessageBox.warning(self, "No Layer", "No active design layer.")
+            return {}
+
+        layer_folder = os.path.join(
+            self.WORKSHEETS_BASE_DIR,
+            self.current_worksheet_name,
+            "designs",
+            self.current_layer_name
+        )
+
+        loaded_baselines = {}
+        for ltype in self.baseline_types:
+            json_filename = f"{ltype}_baseline.json"
+            json_path = os.path.join(layer_folder, json_filename)
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    loaded_baselines[ltype] = data
+                except Exception as e:
+                    self.message_text.append(f"Error loading {ltype}: {str(e)}")
+
+        return loaded_baselines
+    
+# ===========================================================================================================================================================
+    # Updated save_current_design_layer (same as previous, uses self.baseline_widths[ltype])
+    def save_current_design_layer(self):
+        """Save all currently drawn and checked baselines as JSON files with INDIVIDUAL widths."""
+        if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
+            QMessageBox.warning(self, "No Worksheet", "No active worksheet found. Create or open a worksheet first.")
             return
 
-        half_width = width / 2.0
+        if not hasattr(self, 'current_layer_name') or not self.current_layer_name:
+            QMessageBox.warning(self, "No Layer", "No active design layer. Please create a new design layer first.")
+            return
+
+        layer_folder = os.path.join(
+            self.WORKSHEETS_BASE_DIR,
+            self.current_worksheet_name,
+            "designs",
+            self.current_layer_name
+        )
+
+        if not os.path.exists(layer_folder):
+            QMessageBox.critical(self, "Folder Missing", f"Design layer folder not found:\n{layer_folder}")
+            return
+
+        if not self.zero_line_set:
+            QMessageBox.warning(self, "Zero Line Required", "Zero line must be set before saving baselines.")
+            return
+
+        saved_count = 0
+        saved_files = []
+
+        dir_vec = self.zero_end_point - self.zero_start_point
+        zero_length = self.total_distance
+        ref_z = self.zero_start_z
+
+        baseline_checkboxes = {
+            'surface': self.surface_baseline,
+            'construction': self.construction_line,
+            'road_surface': self.road_surface_line,
+            'deck_line': self.deck_line,
+            'projection_line': self.projection_line,
+        }
+
+        for ltype, checkbox in baseline_checkboxes.items():
+            if not checkbox.isChecked():
+                continue
+
+            polylines = self.line_types[ltype]['polylines']
+            if not polylines:
+                continue
+
+            # Use individual width for this baseline
+            width_m = self.baseline_widths.get(ltype, 10.0)
+
+            baseline_data = {
+                "baseline_type": ltype.replace('_', ' ').title(),
+                "baseline_key": ltype,
+                "color": self.line_types[ltype]['color'],
+                "width_meters": float(width_m),  # Saved individually
+                "zero_line_start": self.zero_start_point.tolist(),
+                "zero_line_end": self.zero_end_point.tolist(),
+                "zero_start_elevation": float(ref_z),
+                "total_chainage_length": float(zero_length),
+                "polylines": []
+            }
+
+            for poly_2d in polylines:
+                poly_3d_points = []
+                for dist, rel_z in poly_2d:
+                    t = dist / zero_length
+                    pos_along = self.zero_start_point + t * dir_vec
+                    abs_z = ref_z + rel_z
+                    world_point = [float(pos_along[0]), float(pos_along[1]), float(abs_z)]
+
+                    poly_3d_points.append({
+                        "chainage_m": float(dist),
+                        "relative_elevation_m": float(rel_z),
+                        "world_coordinates": world_point
+                    })
+
+                if len(poly_3d_points) >= 2:
+                    start_chainage = poly_3d_points[0]["chainage_m"]
+                    end_chainage = poly_3d_points[-1]["chainage_m"]
+                    baseline_data["polylines"].append({
+                        "start_chainage_m": float(start_chainage),
+                        "end_chainage_m": float(end_chainage),
+                        "points": poly_3d_points
+                    })
+
+            if not baseline_data["polylines"]:
+                continue
+
+            json_filename = f"{ltype}_baseline.json"
+            json_path = os.path.join(layer_folder, json_filename)
+
+            try:
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(baseline_data, f, indent=4, ensure_ascii=False)
+
+                saved_count += 1
+                saved_files.append(json_filename)
+
+            except Exception as e:
+                QMessageBox.critical(self, "Save Failed", f"Could not save {json_filename}:\n{str(e)}")
+                self.message_text.append(f"Error saving {ltype}: {str(e)}")
+                return
+
+        # Final feedback
+        if saved_count > 0:
+            file_list = "\n".join([f"• {f}" for f in saved_files])
+            self.message_text.append(f"Saved {saved_count} baseline(s) to design layer '{self.current_layer_name}':")
+            self.message_text.append(file_list)
+            self.message_text.append(f"Location: {layer_folder}")
+
+            QMessageBox.information(
+                self,
+                "Save Successful",
+                f"Successfully saved {saved_count} baseline(s):\n\n{file_list}\n\n"
+                f"Folder:\n{layer_folder}\n\n"
+                "You can now close or continue editing."
+            )
+        else:
+            QMessageBox.information(self, "Nothing to Save", "No checked baselines with drawn lines found to save.")
+            self.message_text.append("No baselines saved (none checked or drawn).")
+
+# ===========================================================================================================================================================
+    # Updated map_baselines_to_3d_planes_from_data (no width param, uses per-baseline from data)
+    def map_baselines_to_3d_planes_from_data(self, loaded_baselines):
+        """Regenerate 3D planes from loaded baseline data using their own saved widths."""
+        if not self.zero_line_set:
+            self.message_text.append("Zero line not set - cannot map to 3D.")
+            return
+
         zero_dir_vec = self.zero_end_point - self.zero_start_point
         zero_length = self.total_distance
         ref_z = self.zero_start_z
 
         for ltype, baseline_data in loaded_baselines.items():
+            # Use width from loaded JSON
+            width = baseline_data.get("width_meters", 10.0)
+            half_width = width / 2.0
+
             rgba = self.plane_colors.get(ltype, (0.5, 0.5, 0.5, 0.4))
             color_rgb = rgba[:3]
             opacity = rgba[3]
@@ -1920,7 +2088,6 @@ class PointCloudViewer(ApplicationUI):
 
         self.vtk_widget.GetRenderWindow().Render()
 
-
 # ===========================================================================================================================================================
     def show_graph_section(self, category):
         """
@@ -1973,6 +2140,7 @@ class PointCloudViewer(ApplicationUI):
 
         # 8. Force layout update
         QApplication.processEvents()
+
 # =======================================================================================================================================
     def load_point_cloud_files(self, file_list):
         """Load multiple point cloud files (merge or first one) - currently loads first file with progress bar"""
@@ -2408,7 +2576,8 @@ class PointCloudViewer(ApplicationUI):
 # =======================================================================================================================================
 # UPDATE CHAINAGE TICKS ON GRAPHS
     def update_chainage_ticks(self):
-        """Update both the top Chainage Scale and the main graph X-axis with KM+interval ticks."""
+        """Update both the top Chainage Scale and the main graph X-axis with KM+interval ticks.
+        Now includes sub-interval (half-interval) minor ticks for better readability."""
         if not (self.zero_line_set and hasattr(self, 'zero_interval') and self.zero_interval and
                 hasattr(self, 'zero_start_km') and self.zero_start_km is not None):
             # Fallback to simple distance if no proper chainage config
@@ -2422,19 +2591,29 @@ class PointCloudViewer(ApplicationUI):
             self.canvas.draw_idle()
             return
 
-        # Calculate tick positions
-        num_intervals = int(self.total_distance / self.zero_interval)
-        tick_positions = [i * self.zero_interval for i in range(num_intervals + 1)]
+        interval = self.zero_interval
+        half_interval = interval / 2.0
+
+        # Generate positions: major at 0, interval, 2*interval, ... and minor at half_interval, 1.5*interval, ...
+        max_pos = self.total_distance
+        major_positions = np.arange(0, max_pos + interval / 2, interval)  # + half to include last if close
+        minor_positions = np.arange(half_interval, max_pos + interval / 2, interval)
+
+        # Filter to stay within bounds
+        major_positions = major_positions[major_positions <= max_pos]
+        minor_positions = minor_positions[minor_positions <= max_pos]
+
+        # All tick positions for grid/minor lines (both major and minor)
+        all_tick_positions = np.sort(np.unique(np.concatenate([major_positions, minor_positions])))
+
+        # Generate labels only for major ticks
         tick_labels = []
         current_km = self.zero_start_km
-        remaining = self.total_distance
-        for i in range(num_intervals + 1):
-            interval_value = i * self.zero_interval
-            if interval_value >= 1000:
-                additional_km = int(interval_value // 1000)
-                current_km += additional_km
-                interval_value %= 1000
-            label = f"{current_km}+{int(interval_value):03d}"
+        for pos in major_positions:
+            meters_into_line = pos
+            km_offset = int(meters_into_line // 1000)
+            chainage_m = int(meters_into_line % 1000)
+            label = f"{current_km + km_offset}+{chainage_m:03d}"
             tick_labels.append(label)
 
         # === UPDATE TOP CHAINAGE SCALE (Orange bar) ===
@@ -2444,24 +2623,44 @@ class PointCloudViewer(ApplicationUI):
             self.scale_ax.set_xlim(0, self.total_distance)
             self.scale_ax.set_ylim(-0.1, 1.2)
             self.scale_ax.set_yticks([])
-            self.scale_ax.set_xticks(tick_positions)
+
+            # Major ticks with labels
+            self.scale_ax.set_xticks(major_positions)
             self.scale_ax.set_xticklabels(tick_labels, rotation=15, ha='right', fontsize=8)
+
+            # Minor ticks (no labels)
+            self.scale_ax.set_xticks(minor_positions, minor=True)
+
+            # Style minor ticks
+            self.scale_ax.tick_params(axis='x', which='major', length=10, width=1.5, colors='black')
+            self.scale_ax.tick_params(axis='x', which='minor', length=6, width=1, colors='gray')
+
             self.scale_ax.set_title("Chainage Scale", fontsize=10, pad=10, color='#D35400')
             self.scale_ax.spines['bottom'].set_visible(True)
             self.scale_ax.spines['top'].set_visible(False)
             self.scale_ax.spines['left'].set_visible(False)
             self.scale_ax.spines['right'].set_visible(False)
-            self.scale_ax.tick_params(axis='x', which='both', length=8, width=1, colors='black')
-            self.scale_ax.set_facecolor('#FFE5B4')  # Light orange background for better visibility
+            self.scale_ax.set_facecolor('#FFE5B4')  # Light orange background
             if hasattr(self, 'scale_canvas'):
                 self.scale_canvas.draw_idle()
 
         # === UPDATE MAIN GRAPH X-AXIS ===
         self.ax.set_xlim(0, self.total_distance)
-        self.ax.set_xticks(tick_positions)
+
+        # Major ticks with labels
+        self.ax.set_xticks(major_positions)
         self.ax.set_xticklabels(tick_labels, rotation=15, ha='right', fontsize=8)
+
+        # Minor ticks (sub-intervals)
+        self.ax.set_xticks(minor_positions, minor=True)
+
+        # Style ticks
+        self.ax.tick_params(axis='x', which='major', length=8, width=1.2)
+        self.ax.tick_params(axis='x', which='minor', length=5, width=0.8, color='gray')
+
         self.ax.set_xlabel('Chainage (KM + Interval)', fontsize=10, labelpad=10)
-        self.ax.grid(True, axis='x', linestyle='--', alpha=0.6, linewidth=1.2)
+        self.ax.grid(True, axis='x', which='major', linestyle='--', alpha=0.7, linewidth=1.2)
+        self.ax.grid(True, axis='x', which='minor', linestyle=':', alpha=0.4, linewidth=0.8)
 
         # Improve Y-axis readability
         self.ax.tick_params(axis='y', labelsize=10)
@@ -2472,25 +2671,32 @@ class PointCloudViewer(ApplicationUI):
 # =======================================================================================================================================
 # UPDATE SCALE MARKER BASED ON SLIDER
     def update_scale_marker(self):
-        """Update red marker and chainage label when volume slider moves"""
+        """Update red marker and chainage label when volume slider moves.
+        Now snaps to nearest sub-interval (half of main interval) for better alignment."""
         if not self.zero_line_set or not hasattr(self, 'scale_ax'):
             return
 
         value = self.volume_slider.value()
         pos = value / 100.0 * self.total_distance
 
+        interval = self.zero_interval
+        half_interval = interval / 2.0
+
+        # Snap to nearest half-interval
+        snapped_pos = round(pos / half_interval) * half_interval
+        snapped_pos = max(0, min(snapped_pos, self.total_distance))  # Clamp
+
         # Update vertical red line
-        self.scale_marker.set_data([pos, pos], [0, 1])
+        self.scale_marker.set_data([snapped_pos, snapped_pos], [0, 1])
 
         # === SAFE CHAINAGE LABEL ===
-        interval = int(self.zero_interval)
-        start_km = getattr(self, 'zero_start_km', 0) if hasattr(self, 'zero_start_km') else 0
+        start_km = getattr(self, 'zero_start_km', 0)
 
-        # Find nearest interval mark
-        interval_number = int(round(pos / interval))
-        interval_value_meters = interval_number * interval
+        meters_into_line = snapped_pos
+        km_offset = int(meters_into_line // 1000)
+        chainage_m = int(meters_into_line % 1000)
 
-        marker_label = f"Chainage: {start_km}+{interval_value_meters:03d}"
+        marker_label = f"Chainage: {start_km + km_offset}+{chainage_m:03d}"
 
         # Remove old label
         if hasattr(self, 'scale_marker_label'):
@@ -2501,7 +2707,7 @@ class PointCloudViewer(ApplicationUI):
 
         # Add new label
         self.scale_marker_label = self.scale_ax.text(
-            pos, 1.1, marker_label,
+            snapped_pos, 1.1, marker_label,
             color='red', fontsize=10, fontweight='bold',
             ha='center', va='bottom',
             bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
@@ -2510,12 +2716,11 @@ class PointCloudViewer(ApplicationUI):
 
         # Update bottom indicator line
         if not hasattr(self, 'scale_marker_bottom'):
-            self.scale_marker_bottom, = self.scale_ax.plot([pos, pos], [0, 0.1], color='red', linewidth=2)
+            self.scale_marker_bottom, = self.scale_ax.plot([snapped_pos, snapped_pos], [0, 0.1], color='red', linewidth=2)
         else:
-            self.scale_marker_bottom.set_data([pos, pos], [0, 0.1])
+            self.scale_marker_bottom.set_data([snapped_pos, snapped_pos], [0, 0.1])
 
         self.scale_canvas.draw()
-
 # =======================================================================================================================================
     def update_main_graph_marker(self, slider_value):
         """Update orange vertical marker on main 2D graph"""
@@ -5098,50 +5303,75 @@ class PointCloudViewer(ApplicationUI):
 # MAP ROAD BASELINES TO 3D PLANES
     def map_baselines_to_3d_planes(self):
         """
-        Main function: Called when user clicks 'Map on 3D' button.
-        Creates planes for ALL currently drawn baseline types.
-        Planes are ADDED incrementally — previous planes remain visible.
-        Each time user draws a new line and clicks 'Map on 3D', new planes are added on top.
+        Called when user clicks 'Map on 3D'.
+        - Prompts width for each CHECKED baseline (one dialog at a time, shows name).
+        - Uses individual width per baseline.
+        - Adds new planes incrementally (does NOT clear old ones).
         """
         if not self.zero_line_set:
-            QMessageBox.warning(self, "Zero Line Required", "Please set the Zero Line first before mapping baselines to planes.")
-            self.message_text.append("Zero line must be set.")
+            QMessageBox.warning(self, "Zero Line Required", "Please set the Zero Line first.")
             return
 
-        # Collect all current polylines from baseline types
+        # Map checkboxes to types
+        baseline_checkboxes = {
+            'surface': self.surface_baseline,
+            'construction': self.construction_line,
+            'road_surface': self.road_surface_line,
+            'deck_line': self.deck_line,
+            'projection_line': self.projection_line,
+            # Add 'material': your_material_checkbox if exists
+        }
+
+        checked_types = [ltype for ltype, cb in baseline_checkboxes.items() if cb.isChecked()]
+
+        if not checked_types:
+            QMessageBox.information(self, "Nothing Selected", "No baselines are checked for mapping.")
+            return
+
+        # === Ask width for each checked baseline (one dialog per type) ===
+        for ltype in checked_types:
+            dialog = RoadPlaneWidthDialog(self)
+            display_name = ltype.replace('_', ' ').title()
+            dialog.setWindowTitle(f"Enter Width for {display_name} Baseline")
+
+            # Pre-fill with current known width
+            current_width = self.baseline_widths.get(ltype, 10.0)
+            dialog.width_spin.setValue(current_width)
+
+            if dialog.exec_() != QDialog.Accepted:
+                self.message_text.append(f"Mapping cancelled for {display_name}.")
+                return  # Cancel entire process if user cancels any dialog
+
+            width = dialog.get_width()
+            self.baseline_widths[ltype] = width
+            self.message_text.append(f"Width set → {display_name}: {width:.2f} m")
+
+        # === Collect current drawn polylines only from checked types ===
         current_polylines = {}
-        new_segment_count = 0
-        for ltype in self.baseline_types:
+        total_new_segments = 0
+        for ltype in checked_types:
             polylines = self.line_types[ltype]['polylines']
             if polylines:
                 current_polylines[ltype] = polylines
-                new_segment_count += sum(len(poly) - 1 for poly in polylines if len(poly) >= 2)
+                total_new_segments += sum(len(p) - 1 for p in polylines if len(p) >= 2)
 
-        if new_segment_count == 0:
-            QMessageBox.information(self, "No New Lines", "No new baseline segments detected since last mapping.\nDraw or modify lines and try again.")
-            self.message_text.append("No new baseline segments to map.")
+        if total_new_segments == 0:
+            QMessageBox.information(self, "No New Data", "No new line segments to map. Draw lines first.")
             return
 
-        # Open dialog for width (same width for all this time)
-        dialog = RoadPlaneWidthDialog(self)
-        if dialog.exec_() != QDialog.Accepted:
-            return
-
-        width = dialog.get_width()
-        half_width = width / 2.0
-
-        self.last_plane_width = width  # Store for saving
-
-        # DO NOT clear previous planes — we want to accumulate!
-        # self.clear_baseline_planes()  ← REMOVED INTENTIONALLY
-
+        # === Create planes using individual widths ===
         zero_dir_vec = self.zero_end_point - self.zero_start_point
         zero_length = self.total_distance
         ref_z = self.zero_start_z
 
         plane_count_this_time = 0
+        width_summary = []
 
         for ltype, polylines in current_polylines.items():
+            width = self.baseline_widths[ltype]
+            half_width = width / 2.0
+            width_summary.append(f"{ltype.replace('_', ' ').title()}: {width:.2f} m")
+
             rgba = self.plane_colors.get(ltype, (0.5, 0.5, 0.5, 0.4))
             color_rgb = rgba[:3]
             opacity = rgba[3]
@@ -5156,7 +5386,6 @@ class PointCloudViewer(ApplicationUI):
 
                     pos1 = self.zero_start_point + (dist1 / zero_length) * zero_dir_vec
                     pos2 = self.zero_start_point + (dist2 / zero_length) * zero_dir_vec
-
                     z1 = ref_z + rel_z1
                     z2 = ref_z + rel_z2
 
@@ -5169,29 +5398,23 @@ class PointCloudViewer(ApplicationUI):
                         continue
                     seg_unit = seg_dir / seg_len
 
-                    # Compute horizontal perpendicular direction
                     horiz = np.array([seg_unit[0], seg_unit[1], 0.0])
                     hlen = np.linalg.norm(horiz)
                     if hlen < 1e-6:
-                        # Fallback: perpendicular to zero line
                         zero_unit = zero_dir_vec / np.linalg.norm(zero_dir_vec)
                         perp = np.array([-zero_unit[1], zero_unit[0], 0.0])
                     else:
                         horiz /= hlen
                         perp = np.array([-horiz[1], horiz[0], 0.0])
 
-                    # Normalize perp just in case
-                    perp_len = np.linalg.norm(perp)
-                    if perp_len > 0:
-                        perp /= perp_len
+                    if np.linalg.norm(perp) > 0:
+                        perp /= np.linalg.norm(perp)
 
-                    # Four corners of the plane segment
                     c1 = center1 + perp * half_width
                     c2 = center1 - perp * half_width
                     c3 = center2 - perp * half_width
                     c4 = center2 + perp * half_width
 
-                    # Create rectangular plane
                     plane = vtkPlaneSource()
                     plane.SetOrigin(c1[0], c1[1], c1[2])
                     plane.SetPoint1(c4[0], c4[1], c4[2])
@@ -5211,35 +5434,29 @@ class PointCloudViewer(ApplicationUI):
                     actor.GetProperty().SetEdgeColor(*color_rgb)
                     actor.GetProperty().SetLineWidth(1.5)
 
-                    # Add to scene and store
                     self.renderer.AddActor(actor)
                     self.baseline_plane_actors.append(actor)
                     plane_count_this_time += 1
 
-        # Final render
+        # Render and feedback
         self.vtk_widget.GetRenderWindow().Render()
 
-        # Feedback
         total_planes = len(self.baseline_plane_actors)
-        self.message_text.append(f"Added {plane_count_this_time} new plane segments (width: {width:.2f}m). Total visible: {total_planes}")
-        
+        width_list = "\n".join(width_summary)
+
+        self.message_text.append(f"Added {plane_count_this_time} new plane segments.")
+        self.message_text.append(f"Widths used:\n{width_list}")
+
         QMessageBox.information(
             self,
-            "Planes Added Successfully",
-            f"Added {plane_count_this_time} new plane segments in this mapping.\n"
-            f"Width: {width:.2f} m (±{half_width:.2f} m each side)\n\n"
-            f"Total planes now visible: {total_planes}\n\n"
-            "You can continue drawing more lines and click 'Map on 3D' again — "
-            "new planes will be added without removing old ones.\n\n"
-            "Color Guide:\n"
-            "• Surface → Green\n"
-            "• Construction → Red\n"
-            "• Road Surface → Blue\n"
-            "• Deck Line → Orange\n"
-            "• Projection → Purple\n"
-            "• Material → Yellow"
+            "Mapping Complete",
+            f"Successfully added {plane_count_this_time} new plane segments.\n\n"
+            f"Widths applied:\n{width_list}\n\n"
+            f"Total planes visible: {total_planes}\n\n"
+            "You can draw more lines and click 'Map on 3D' again — "
+            "new planes will be added on top of existing ones.\n\n"
+            "Remember to click 'Save' to permanently store baselines with these widths."
         )
-
 # ===========================================================================================================================================================
     def clear_baseline_planes(self):
         """Remove ALL accumulated baseline plane actors — used only on reset or new worksheet."""
@@ -5749,25 +5966,33 @@ class PointCloudViewer(ApplicationUI):
             return False
 
 # =====================================================================================================================
-
     def format_chainage(self, x, for_dialog=False):
-        """Convert chainage in meters to KM+Interval format"""
-        if not self.zero_line_set or self.zero_start_km is None or self.zero_interval <= 0:
+        """
+        Convert chainage in meters to KM+Interval format.
+        CRITICAL FIX: Now uses EXACT meter value for chainage string (supports sub-intervals).
+        """
+        if not self.zero_line_set or self.zero_start_km is None:
             return f"{x:.2f}m"
 
-        interval_number = int(round(x / self.zero_interval))
-        interval_value = int(round(interval_number * self.zero_interval))
+        # Total meters along the zero line
+        total_meters = x
 
-        km = self.zero_start_km
-        interval_str = f"{interval_value:03d}"
+        # Base KM from zero line start
+        base_km = int(self.zero_start_km)
 
-        chainage_str = f"{km}+{interval_str}"
+        # Calculate total meters from KM 0+000
+        total_from_zero = base_km * 1000 + total_meters
 
-        # Only add approx note if NOT for dialog
+        # Final KM = integer part of total meters / 1000
+        final_km = int(total_from_zero // 1000)
+        chainage_m = int(round(total_from_zero % 1000))  # Exact meters within KM
+
+        chainage_str = f"{final_km}+{chainage_m:03d}"
+
+        # Only add approximation note if NOT for dialog (i.e., for display only)
         if not for_dialog:
-            exact_interval = interval_number * self.zero_interval
-            if abs(x - exact_interval) > 0.01:
-                chainage_str += f" (approx {x:.2f}m)"
+            # Show exact distance in meters for transparency
+            chainage_str += f" ({x:.2f}m)"
 
         return chainage_str
 
@@ -5886,16 +6111,80 @@ class PointCloudViewer(ApplicationUI):
                     self.current_material_line_artist = None
                 self.canvas.draw_idle()
                 self.message_text.append("Current drawing cancelled.")
-    # =====================================================================
-    # Keep your existing _clear_current_drawing()
-    # =====================================================================
-    # def _clear_current_drawing(self):
-    #     if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
-    #         self.current_material_line_artist.remove()
-    #         self.current_material_line_artist = None
-    #     self.material_drawing_points = []
-    #     self.canvas.draw_idle()
 
+
+# ==================================================================
+    def _get_material_line_points_for_segment(self, material_index, from_m, to_m):
+        """
+        FINAL VERSION: Robustly finds the correct material folder using name matching.
+        NEW: Loads the saved polyline points from the latest material JSON for accurate material elevations.
+        Interpolates y_dense from these drawn points (not ref baseline) for variable thickness.
+        No more KeyError or "could not find material" errors.
+        """
+        if not hasattr(self, 'material_items') or not self.material_items:
+            self.message_text.append("No material lines defined yet.")
+            return [], []
+
+        if material_index >= len(self.material_items):
+            self.message_text.append(f"Material index {material_index} out of range.")
+            return [], []
+
+        target_item = self.material_items[material_index]
+        folder_name = target_item.get('folder') or target_item.get('data', {}).get('folder_name')
+
+        if not folder_name:
+            self.message_text.append("Material folder name not found.")
+            return [], []
+
+        material_folder = os.path.join(self.current_construction_layer_path, folder_name)
+        if not os.path.exists(material_folder):
+            self.message_text.append(f"Material folder not found: {material_folder}")
+            return [], []
+
+        # Find latest material segment JSON
+        try:
+            json_files = [f for f in os.listdir(material_folder)
+                          if f.startswith("material_") and f.endswith(".json")]
+            if not json_files:
+                self.message_text.append("No saved material segment found.")
+                return [], []
+
+            latest_json = sorted(json_files, key=lambda x: os.path.getmtime(os.path.join(material_folder, x)))[-1]
+            json_path = os.path.join(material_folder, latest_json)
+
+            with open(json_path, 'r', encoding='utf-8') as f:
+                seg_data = json.load(f)
+
+            # NEW: Use saved from/to if not provided
+            from_chainage_m = from_m if from_m is not None else seg_data["from_chainage"].get("chainage_m", 0.0)
+            to_chainage_m   = to_m if to_m is not None else seg_data["to_chainage"].get("chainage_m", self.total_distance or 278.0)
+
+            # NEW: Load saved polyline points for material elevations
+            poly_points = seg_data.get("polyline_points", [])
+            if not poly_points or len(poly_points) < 2:
+                self.message_text.append("No saved polyline points in JSON – cannot interpolate material line.")
+                return [], []
+
+            # Sort points by chainage_m (just in case)
+            poly_points.sort(key=lambda p: p["chainage_m"])
+
+            mat_xs = [p["chainage_m"] for p in poly_points]
+            mat_ys = [p["relative_elevation_m"] for p in poly_points]
+
+        except Exception as e:
+            self.message_text.append(f"Error reading material segment: {str(e)}")
+            return [], []
+
+        # Generate dense material line by interpolating from SAVED drawn points
+        x_dense = np.linspace(from_chainage_m, to_chainage_m, 1500)
+        y_dense = np.interp(x_dense, mat_xs, mat_ys, left=mat_ys[0], right=mat_ys[-1])
+
+        self.message_text.append(
+            f"Material line loaded from drawn points: {from_chainage_m:.1f}m → {to_chainage_m:.1f}m "
+            f"({len(x_dense)} points interpolated)"
+        )
+        return x_dense.tolist(), y_dense.tolist()
+    
 # =======================================================================================================================================
     def finish_material_segment(self):
         """Finish the current material line drawing and save permanently with real-world coordinates"""
@@ -5931,30 +6220,37 @@ class PointCloudViewer(ApplicationUI):
 
             from_m = config.get('from_chainage_m')
             to_m   = config.get('to_chainage_m')
-            recorded_thickness_mm = config.get('material_thickness_m', 0)
+            thickness_m = config.get('material_thickness_m', 0.0)   # Retained for JSON, not used for filling height
 
             if from_m is None or to_m is None or to_m <= from_m:
                 QMessageBox.warning(self, "Invalid Input", "From chainage must be less than To chainage.")
                 return
 
-            if recorded_thickness_mm <= 0:
+            # Optional warning if thickness is zero (but now it's not used for height)
+            if thickness_m <= 0:
                 reply = QMessageBox.question(
                     self, "Thickness Zero",
-                    "Material thickness is 0 mm. This will be saved for records,\n"
-                    "but actual displayed thickness is based on drawn line height.\n\n"
+                    "Material thickness is 0 m – this is for documentation only (filling uses drawn coordinates).\n"
                     "Continue anyway?",
                     QMessageBox.Yes | QMessageBox.No
                 )
                 if reply == QMessageBox.No:
                     return
 
-            # === SAVE TO JSON WITH REAL 3D COORDINATES FROM ZERO LINE ===
+            # === NEW: Prepare polyline points for saving ===
+            polyline_points = [
+                {"chainage_m": round(p[0], 3), "relative_elevation_m": round(p[1], 3)}
+                for p in self.material_drawing_points
+            ]
+
+            # === SAVE TO JSON WITH REAL 3D COORDINATES AND POLYLINE POINTS ===
             self.save_material_segment_to_json(
                 material_idx=material_idx,
                 config=config,
                 from_m=from_m,
                 to_m=to_m,
-                point_number=None
+                point_number=None,
+                polyline_points=polyline_points  # NEW: Pass points for saving
             )
 
             # === DRAW PERMANENT ORANGE POLYLINE ===
@@ -5973,37 +6269,32 @@ class PointCloudViewer(ApplicationUI):
                 alpha=0.9
             )[0]
 
-            if not hasattr(self, 'material_polylines_artists'):
-                self.material_polylines_artists = {}
             if material_idx not in self.material_polylines_artists:
                 self.material_polylines_artists[material_idx] = []
             self.material_polylines_artists[material_idx].append(permanent_line)
 
-            # Clear preview
+            # Clear temporary preview
             if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
                 self.current_material_line_artist.remove()
                 self.current_material_line_artist = None
             self.material_drawing_points = []
 
-            # Draw filling
+            # === DRAW THE HATCHING / FILLING USING DYNAMIC THICKNESS FROM COORDINATES ===
             self.draw_material_filling(
                 from_chainage_m=from_m,
                 to_chainage_m=to_m,
-                thickness_m=0,
+                thickness_m=thickness_m,                     # Passed but not used for height
                 material_index=material_idx,
                 material_config=self.material_configs[material_idx],
                 color='#FF9800',
                 alpha=0.6
             )
 
-            self.message_text.append(f"Material segment added permanently: M{material_idx+1}")
+            self.message_text.append(f"Material segment M{material_idx+1} finished and filled.")
             self.message_text.append(f"   Chainage: {self.format_chainage(from_m)} → {self.format_chainage(to_m)}")
-            if recorded_thickness_mm > 0:
-                self.message_text.append(f"   Recorded thickness: {recorded_thickness_mm:.0f} mm (documentation)")
-            self.message_text.append("   Real-world 3D coordinates (X,Y,Z) saved from zero line endpoints.")
+            self.message_text.append(f"   Nominal thickness (doc only): {thickness_m*1000:.0f} mm")
 
             self.canvas.draw_idle()
-
         else:
             # Cancelled
             if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
@@ -6012,7 +6303,6 @@ class PointCloudViewer(ApplicationUI):
             self.material_drawing_points = []
             self.message_text.append("Material segment cancelled.")
             self.canvas.draw_idle()
-
 # =======================================================================================================================================
 # CONSOLIDATED: Single setup_label_click_handler (remove duplicates; use unified on_label_pick)
 # =======================================================================================================================================
@@ -6198,23 +6488,25 @@ class PointCloudViewer(ApplicationUI):
             else:
                 self.message_text.append(f"Material segment configuration cancelled for M{material_idx + 1}-{point_number}")
 
-# ========================================================
-    def save_material_segment_to_json(self, material_idx, config, from_m, to_m, point_number=None):
+# ==============================================================================================================================
+    def save_material_segment_to_json(self, material_idx, config, from_m, to_m, point_number=None, polyline_points=None):
         """
-        Save material segment with REAL 3D coordinates + formatted chainage strings (e.g., "101+000").
-        Includes both structured data and human-readable chainage strings.
+        Save material segment JSON with CORRECT real 3D coordinates and EXACT chainage strings.
+        NEW: Saves the drawn polyline points for accurate interpolation of material elevations.
+        Supports sub-interval clicks accurately.
         """
         import os
         import json
         from datetime import datetime
         import numpy as np
 
+        # Basic validations
         if not self.current_worksheet_name:
             QMessageBox.warning(self, "No Worksheet", "No active worksheet found.")
             return
 
         if material_idx >= len(self.material_configs):
-            QMessageBox.warning(self, "Invalid Index", "Material line index out of range.")
+            QMessageBox.critical(self, "Invalid Index", "Material line index out of range.")
             return
 
         mat_config = self.material_configs[material_idx]
@@ -6230,42 +6522,35 @@ class PointCloudViewer(ApplicationUI):
             return
 
         material_folder_path = os.path.join(self.current_construction_layer_path, folder_name)
-        if not os.path.exists(material_folder_path):
-            QMessageBox.warning(self, "Folder Not Found", f"Material folder not found:\n{material_folder_path}")
+        os.makedirs(material_folder_path, exist_ok=True)
+
+        # Validate zero line for interpolation
+        if (not self.zero_line_set or
+            not hasattr(self, 'zero_start_point') or
+            not hasattr(self, 'zero_end_point') or
+            not hasattr(self, 'total_distance') or
+            self.total_distance <= 0):
+            QMessageBox.critical(self, "Zero Line Error",
+                                 "Zero line not properly set. Cannot calculate real coordinates.")
             return
 
-        # === INTERPOLATE REAL 3D COORDINATES USING ZERO LINE ENDPOINTS ===
-        def interpolate_xyz(chainage_m):
-            if (not self.zero_line_set or 
-                not hasattr(self, 'zero_start_point') or 
-                not hasattr(self, 'zero_end_point') or 
-                self.total_distance <= 0):
-                return None, None, None
+        start_pt = np.array(self.zero_start_point)
+        end_pt = np.array(self.zero_end_point)
+        total_len = float(self.total_distance)
 
-            t = np.clip(chainage_m / self.total_distance, 0.0, 1.0)
-            start = np.array(self.zero_start_point)
-            end = np.array(self.zero_end_point)
-            point_3d = start + t * (end - start)
+        def interpolate_xyz(chainage_m):
+            t = np.clip(chainage_m / total_len, 0.0, 1.0)
+            point_3d = start_pt + t * (end_pt - start_pt)
             return round(point_3d[0], 3), round(point_3d[1], 3), round(point_3d[2], 3)
 
         from_X, from_Y, from_Z = interpolate_xyz(from_m)
         to_X,   to_Y,   to_Z   = interpolate_xyz(to_m)
 
-        # === KM + Interval Calculation ===
-        def get_km_interval(chainage_m):
-            if not hasattr(self, 'zero_start_km') or self.zero_start_km is None:
-                return 0, round(chainage_m, 3)
-            km = int(self.zero_start_km)
-            interval = chainage_m - (km * 1000)
-            return km, round(interval, 3)
+        # Use exact chainage strings using the improved format_chainage
+        from_chainage_str = self.format_chainage(from_m, for_dialog=True)
+        to_chainage_str   = self.format_chainage(to_m,   for_dialog=True)
 
-        from_km, from_interval = get_km_interval(from_m)
-        to_km,   to_interval   = get_km_interval(to_m)
-
-        # === FORMATTED CHAINAGE STRINGS (e.g., "101+000", "101+080") ===
-        from_chainage_str = f"{from_km}+{int(from_interval):03d}"
-        to_chainage_str   = f"{to_km}+{int(to_interval):03d}"
-
+        # Filename and data
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         suffix = f"_P{point_number}" if point_number is not None else ""
         filename = f"material_{folder_name}{suffix}_{timestamp}.json"
@@ -6276,28 +6561,21 @@ class PointCloudViewer(ApplicationUI):
             "material_line_name": display_name,
             "point_number": point_number,
             "from_chainage": {
-                "coordinates": [
-                    from_X,
-                    from_Y,
-                    from_Z
-                ],
-                "km": from_km,
-                "chainage_m": from_interval
+                "coordinates": [from_X, from_Y, from_Z],
+                "chainage_m": round(from_m, 3),
+                "chainage_str": from_chainage_str
             },
             "to_chainage": {
-                "coordinates": [
-                    to_X,
-                    to_Y,
-                    to_Z
-                ],
-                "km": to_km,
-                "chainage_m": to_interval
+                "coordinates": [to_X, to_Y, to_Z],
+                "chainage_m": round(to_m, 3),
+                "chainage_str": to_chainage_str
             },
-            "from_chainage_str": from_chainage_str,   # ← NEW: "101+000"
-            "to_chainage_str": to_chainage_str,       # ← NEW: "101+080"
-            "material_thickness_m": config.get('material_thickness_m', 0),
+            "from_chainage_str": from_chainage_str,       # Legacy
+            "to_chainage_str": to_chainage_str,           # Legacy
+            "material_thickness_m": config.get('material_thickness_m', 0),  # Nominal/doc only
             "width_m": config.get('width_m'),
             "after_rolling_thickness_m": config.get('after_rolling_thickness_m'),
+            "polyline_points": polyline_points or [],     # NEW: Saved drawn points
             "created_at": datetime.now().isoformat(),
             "worksheet": self.current_worksheet_name,
             "construction_layer": os.path.basename(self.current_construction_layer_path)
@@ -6307,14 +6585,17 @@ class PointCloudViewer(ApplicationUI):
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
 
-            self.message_text.append(f"  → Saved: {filename}")
-            self.message_text.append("  → Real 3D coordinates + formatted chainage strings saved.")
+            self.message_text.append(f"Material segment saved: {filename}")
+            self.message_text.append(f"   From: {from_chainage_str} → ({from_X:.3f}, {from_Y:.3f}, {from_Z:.3f})")
+            self.message_text.append(f"   To:   {to_chainage_str} → ({to_X:.3f}, {to_Y:.3f}, {to_Z:.3f})")
+            self.message_text.append(f"   Exact distance: {from_m:.2f}m → {to_m:.2f}m")
+            if polyline_points:
+                self.message_text.append(f"   Saved {len(polyline_points)} polyline points for accurate filling.")
 
         except Exception as e:
             QMessageBox.critical(self, "Save Failed", f"Error saving JSON:\n{str(e)}")
-            self.message_text.append(f"  → Save error: {str(e)}")
-
-
+            self.message_text.append(f"Save error: {str(e)}")
+# =====================================================================================================================================
     def get_real_coordinates_from_chainage(self, chainage_m):
         """
         Return real-world (X, Y, Z) coordinates for a given chainage in meters.
@@ -6428,7 +6709,6 @@ class PointCloudViewer(ApplicationUI):
 
 # =======================================================================================================================================
 # UPDATE toggle for construction (if exists, add similar activation)
-# =======================================================================================================================================
     def toggle_construction_line(self, state):  # Assuming this exists for construction checkbox
         """Toggle construction mode like material"""
         if state == Qt.Checked:
@@ -6448,147 +6728,205 @@ class PointCloudViewer(ApplicationUI):
     def draw_material_filling(self, from_chainage_m, to_chainage_m, thickness_m,
                               material_index, material_config, color='#FF9800', alpha=0.6):
         """
-        Draws dense black cross-hatching ('xx') with light orange background
-        by directly loading the selected baseline JSON from the design layer.
-        Uses exact path logic from MaterialLineDialog.
+        100% ACCURATE FILLING: Uses the generated material line from saved drawn points (top)
+        and baseline (bottom). Fills EXACTLY between them with variable thickness from coordinates.
+        No static thickness added – no overfilling. Clean corners. Perfect alignment.
         """
+        import numpy as np
+        from matplotlib.patches import Polygon
+
         if not hasattr(self, 'ax') or self.ax is None:
             return
 
+        # ------------------------------------------------------------------
+        # 1. Load reference baseline (bottom boundary)
+        # ------------------------------------------------------------------
         ref_xs, ref_ys = self._load_baseline_from_design_layer(material_config)
-        if ref_xs is None:
-            self.message_text.append(f"Failed to load baseline for '{material_config.get('ref_layer')}'. Hatching skipped.")
+        if not ref_xs or len(ref_xs) < 2:
+            self.message_text.append("Hatching failed: could not load reference baseline.")
             return
 
-        # Get material line points
-        mat_xs, mat_ys = [], []
-        if hasattr(self, 'material_drawing_points') and self.material_drawing_points:
-            points = [p for p in self.material_drawing_points 
-                      if from_chainage_m <= p[0] <= to_chainage_m]
-            if len(points) >= 2:
-                mat_xs = [p[0] for p in points]
-                mat_ys = [p[1] for p in points]
-
-        if not mat_xs and material_index in self.material_polylines_artists:
-            artists = self.material_polylines_artists[material_index]
-            if artists:
-                line = artists[-1]
-                xdata = line.get_xdata()
-                ydata = line.get_ydata()
-                mask = (xdata >= from_chainage_m) & (xdata <= to_chainage_m)
-                mat_xs = xdata[mask].tolist()
-                mat_ys = ydata[mask].tolist()
-
+        # ------------------------------------------------------------------
+        # 2. Get the generated material line points (top boundary, from saved drawn JSON points)
+        # ------------------------------------------------------------------
+        mat_xs, mat_ys = self._get_material_line_points_for_segment(
+            material_index, from_chainage_m, to_chainage_m
+        )
         if len(mat_xs) < 2:
-            self.message_text.append("Material line has no valid points.")
+            self.message_text.append("Hatching failed: material line too short.")
             return
 
-        # Dense interpolation
-        x_dense = np.linspace(from_chainage_m, to_chainage_m, 1500)
-        ref_y_interp = np.interp(x_dense, ref_xs, ref_ys, left=ref_ys[0], right=ref_ys[-1])
-        mat_y_interp = np.interp(x_dense, mat_xs, mat_ys, left=mat_ys[0], right=mat_ys[-1])
+        x_dense = np.array(mat_xs)
+        mat_y_dense = np.array(mat_ys)  # Top: drawn material elevations
 
-        # Polygon vertices
+        # ------------------------------------------------------------------
+        # 3. Interpolate baseline elevation at the exact same X points (bottom)
+        # ------------------------------------------------------------------
+        bottom_y = np.interp(x_dense, ref_xs, ref_ys, left=ref_ys[0], right=ref_ys[-1])
+
+        # ------------------------------------------------------------------
+        # 4. Top boundary = drawn material y (no static thickness added)
+        #    Dynamic thickness = mat_y_dense - bottom_y (variable at each point)
+        # ------------------------------------------------------------------
+        top_y = mat_y_dense  # Exact top from drawn line
+
+        # Validation: Ensure no negative thickness (material above baseline)
+        if np.any(top_y < bottom_y):
+            self.message_text.append("Warning: Some material elevations below baseline – clipping to 0 thickness.")
+            top_y = np.maximum(top_y, bottom_y)
+
+        # ------------------------------------------------------------------
+        # 5. Create closed polygon: bottom → top → back
+        # ------------------------------------------------------------------
         vertices = np.vstack([
-            np.column_stack([x_dense, ref_y_interp]),
-            np.column_stack([x_dense[::-1], mat_y_interp[::-1]])
+            np.column_stack([x_dense, bottom_y]),           # Bottom: along baseline
+            np.column_stack([x_dense[::-1], top_y[::-1]])    # Top: drawn material, reversed
         ])
 
-        from matplotlib.patches import Polygon
-
-        # Light orange background
-        bg = Polygon(vertices, closed=True, facecolor=color, alpha=0.3, edgecolor='none', zorder=2)
+        # ------------------------------------------------------------------
+        # 6. Draw solid orange fill + cross-hatching
+        # ------------------------------------------------------------------
+        bg = Polygon(vertices, closed=True, facecolor=color, alpha=0.35,
+                     edgecolor='none', zorder=2)
         self.ax.add_patch(bg)
 
-        # Dense cross-hatching
-        hatch = Polygon(vertices, closed=True, facecolor='none', hatch='xx', linewidth=0, zorder=3)
+        hatch = Polygon(vertices, closed=True, facecolor='none', hatch='xx',
+                        edgecolor='black', linewidth=0.8, zorder=3)
         self.ax.add_patch(hatch)
 
-        # Thickness label
-        avg_mm = np.mean(mat_y_interp - ref_y_interp) * 1000
-        mid_x = (from_chainage_m + to_chainage_m) / 2
-        mid_y = np.mean(ref_y_interp) + avg_mm / 2000
+        # ------------------------------------------------------------------
+        # 7. Place thickness label in the center (use average computed thickness)
+        # ------------------------------------------------------------------
+        computed_thicknesses = top_y - bottom_y
+        avg_thickness_mm = np.mean(computed_thicknesses) * 1000
+        mid_x = np.mean(x_dense)
+        mid_y = np.mean(bottom_y) + np.mean(computed_thicknesses) / 2  # Midpoint vertically
 
         self.ax.text(mid_x, mid_y,
-                     f"M{material_index+1}\n{avg_mm:.0f}mm",
-                     ha='center', va='center', fontsize=9, fontweight='bold',
+                     f"M{material_index+1}\n{avg_thickness_mm:.0f}mm (avg)",
+                     ha='center', va='center', fontsize=10, fontweight='bold',
                      color='black',
-                     bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', boxstyle='round,pad=0.5'),
-                     zorder=4)
+                     bbox=dict(facecolor='white', alpha=0.95, edgecolor='none',
+                               boxstyle='round,pad=0.6'),
+                     zorder=5)
 
+        # Store patches for potential cleanup later
         if not hasattr(self, 'material_fill_patches'):
             self.material_fill_patches = []
         self.material_fill_patches.append({'bg': bg, 'hatch': hatch})
 
         self.canvas.draw_idle()
-        self.message_text.append(f"Hatching successfully drawn for M{material_index+1} using '{material_config.get('ref_layer')}' baseline")
-
-
+        self.message_text.append(
+            f"✓ ACCURATE HATCHING DRAWN for M{material_index+1} "
+            f"(variable {avg_thickness_mm:.0f} mm avg thick) – exactly between baseline and drawn material line"
+        )
+# ==============================================================================================================================================
     def _load_baseline_from_design_layer(self, material_config):
         """
-        Loads the baseline JSON directly from the design layer.
-        Uses the EXACT same path logic as MaterialLineDialog.load_available_baselines().
+        Loads the reference baseline JSON used by a material line.
+        Now correctly handles your actual baseline format (polylines → points → chainage_m & relative_elevation_m).
         """
         if not material_config.get('from_another', False):
             return None, None
 
-        selected = material_config.get('ref_layer', '').strip()
-        if not selected or selected == "None":
+        selected_display_name = material_config.get('ref_layer', '').strip()
+        if not selected_display_name or selected_display_name in ("", "None"):
+            self.message_text.append("No reference baseline selected for this material line.")
             return None, None
 
-        # Must have current construction layer path
         if not hasattr(self, 'current_construction_layer_path') or not self.current_construction_layer_path:
             self.message_text.append("Current construction layer path not set.")
             return None, None
 
         config_path = os.path.join(self.current_construction_layer_path, "Construction_Layer_config.txt")
         if not os.path.exists(config_path):
-            self.message_text.append(f"Construction_Layer_config.txt not found at {config_path}")
+            self.message_text.append(f"Construction_Layer_config.txt not found: {config_path}")
             return None, None
 
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
         except Exception as e:
-            self.message_text.append(f"Error reading Construction_Layer_config.txt: {str(e)}")
+            self.message_text.append(f"Failed to read config: {str(e)}")
             return None, None
 
-        ref_layer_name = config.get("reference_layer_2d")
-        if not ref_layer_name:
-            self.message_text.append("No reference_layer_2d in Construction_Layer_config.txt")
+        reference_layer_2d = config.get("reference_layer_2d")
+        if not reference_layer_2d:
+            self.message_text.append("reference_layer_2d not defined.")
             return None, None
 
-        design_layer_path = os.path.normpath(
-            os.path.join(self.current_construction_layer_path, "..", "..", "designs", ref_layer_name)
-        )
+        selected_baselines = config.get("base_lines_reference", [])
+        if not selected_baselines:
+            self.message_text.append("No baselines in base_lines_reference.")
+            return None, None
+
+        # Correct path: go up TWO levels to worksheet root
+        worksheet_root = os.path.abspath(os.path.join(self.current_construction_layer_path, "..", ".."))
+        designs_folder = os.path.join(worksheet_root, "designs")
+        design_layer_path = os.path.join(designs_folder, reference_layer_2d)
 
         if not os.path.exists(design_layer_path):
             self.message_text.append(f"Design layer folder not found: {design_layer_path}")
             return None, None
 
-        baseline_file = f"{selected}_baseline.json"
-        baseline_path = os.path.join(design_layer_path, baseline_file)
+        # Find matching filename
+        target_filename = None
+        for baseline_file in selected_baselines:
+            display_name = os.path.basename(baseline_file).replace("_baseline.json", "")
+            if display_name == selected_display_name:
+                target_filename = baseline_file
+                break
 
+        if not target_filename:
+            self.message_text.append(f"Baseline '{selected_display_name}' not found in list.")
+            return None, None
+
+        baseline_path = os.path.join(design_layer_path, target_filename)
         if not os.path.exists(baseline_path):
-            self.message_text.append(f"Baseline file not found: {baseline_path}")
+            self.message_text.append(f"Baseline file missing: {baseline_path}")
             return None, None
 
         try:
             with open(baseline_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            if 'points' not in data or len(data['points']) < 2:
-                self.message_text.append("Baseline file has no valid points.")
+            # NEW: Extract points from your actual structure
+            all_points = []
+            if "polylines" in data and len(data["polylines"]) > 0:
+                for poly in data["polylines"]:
+                    if "points" in poly:
+                        all_points.extend(poly["points"])
+            elif "points" in data:  # fallback for older format
+                all_points = data["points"]
+
+            if len(all_points) < 2:
+                self.message_text.append(f"Baseline has too few points ({len(all_points)}) after parsing.")
                 return None, None
 
-            xs = [p[0] for p in data['points']]
-            ys = [p[1] for p in data['points']]
+            # Extract chainage (x) and elevation (y)
+            xs = []
+            ys = []
+            for pt in all_points:
+                if isinstance(pt, dict):
+                    xs.append(pt.get("chainage_m", 0))
+                    ys.append(pt.get("relative_elevation_m", 0))
+                elif isinstance(pt, list) and len(pt) >= 2:
+                    xs.append(pt[0])
+                    ys.append(pt[1])
+
+            if len(xs) < 2:
+                self.message_text.append("Failed to extract valid chainage/elevation pairs.")
+                return None, None
+
+            self.message_text.append(
+                f"Baseline loaded successfully: '{selected_display_name}' "
+                f"({len(xs)} points from {baseline_path})"
+            )
             return xs, ys
 
         except Exception as e:
-            self.message_text.append(f"Error reading baseline file {baseline_path}: {str(e)}")
+            self.message_text.append(f"Error reading baseline: {str(e)}")
             return None, None
-
 # ========================================================================================================================================
 #                                                   *** END OF APPLICAATION ***
 # ========================================================================================================================================      

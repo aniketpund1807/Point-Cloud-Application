@@ -19,7 +19,6 @@ def main():
         # User cancelled login
         sys.exit(0)
 
-    # Login successful → get username and open main application
     username = login_dlg.logged_in_username  # This attribute was already set in login.py
 
     window = PointCloudViewer(username=username)  # Pass username
