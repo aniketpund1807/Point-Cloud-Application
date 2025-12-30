@@ -8,6 +8,8 @@ from PyQt5.QtWidgets import (
 from vtkmodules.vtkRenderingCore import vtkActor, vtkPolyDataMapper
 from vtkmodules.vtkFiltersSources import vtkPlaneSource
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QDoubleValidator
+
 import os
 import json
 
@@ -2887,24 +2889,37 @@ class WorksheetNewDialog(QDialog):
 # ===========================================================================================================================
 # ** ROAD PLANE WIDTH DIALOG **  For the road baseline map on 3D Point Cloud Data
 # ===========================================================================================================================
+
 class RoadPlaneWidthDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, current_width=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Road Plane Width")
         self.setModal(True)
         self.setFixedSize(400, 180)
+
         self.setStyleSheet("""
             QDialog {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                             stop:0 #f0e6fa, stop:1 #e6e6fa);
                 border-radius: 15px;
             }
-            QLabel { color: #2d1b3d; font-weight: bold; font-size: 14px; }
-            QDoubleSpinBox {
+            QLabel { 
+                color: #2d1b3d; 
+                font-weight: bold; 
+                font-size: 14px; 
+            }
+            QLineEdit {
                 border: 2px solid #BA68C8;
                 border-radius: 8px;
-                padding: 6px;
-                font-size: 14px;
+                padding: 10px;
+                font-size: 16px;
+                background-color: white;
+            }
+            QLineEdit:focus {
+                border: 2px solid #9C27B0;
+            }
+            QLineEdit::placeholder {
+                color: #999;
             }
             QPushButton {
                 border-radius: 20px;
@@ -2918,47 +2933,79 @@ class RoadPlaneWidthDialog(QDialog):
                                           stop:0 #AB47BC, stop:1 #8E24AA);
                 color: white;
             }
-            QPushButton#okBtn:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #9C27B0, stop:1 #7B1FA2); }
+            QPushButton#okBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #9C27B0, stop:1 #7B1FA2);
+            }
             QPushButton#cancelBtn {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                                           stop:0 #E1BEE7, stop:1 #CE93D8);
                 color: #333;
             }
+            QPushButton#cancelBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #CE93D8, stop:1 #BA68C8);
+            }
         """)
 
+        # Main layout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(25, 25, 25, 25)
         layout.setSpacing(20)
 
-        title = QLabel("Enter Road Plane Width (meters)")
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
+        # Dynamic title label
+        self.title_label = QLabel("Enter Road Plane Width (meters)")
+        self.title_label.setAlignment(Qt.AlignCenter)
+        self.title_label.setWordWrap(True)
+        layout.addWidget(self.title_label)
 
-        self.width_spin = QDoubleSpinBox()
-        self.width_spin.setRange(1.0, 1000.0)
-        self.width_spin.setSingleStep(1.0)
-        self.width_spin.setValue(10.0)
-        self.width_spin.setDecimals(2)
-        layout.addWidget(self.width_spin)
+        # Width input - QLineEdit with strict float validation
+        self.width_input = QLineEdit()
+        self.width_input.setPlaceholderText("e.g. 20.0")
+        self.width_input.setAlignment(Qt.AlignCenter)
 
+        # Restrict input to valid positive float numbers (0.1 to 1000.0, up to 2 decimals)
+        validator = QDoubleValidator(0.1, 1000.0, 2)
+        validator.setNotation(QDoubleValidator.StandardNotation)
+        self.width_input.setValidator(validator)
+
+        # Pre-fill if a valid current width is provided
+        if current_width is not None and current_width > 0:
+            self.width_input.setText(f"{float(current_width):.2f}")
+
+        layout.addWidget(self.width_input)
+
+        # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-
-        ok_btn = QPushButton("OK")
-        ok_btn.setObjectName("okBtn")
-        ok_btn.clicked.connect(self.accept)
 
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName("cancelBtn")
         cancel_btn.clicked.connect(self.reject)
 
+        ok_btn = QPushButton("OK")
+        ok_btn.setObjectName("okBtn")
+        ok_btn.clicked.connect(self.accept)
+
         btn_layout.addWidget(cancel_btn)
         btn_layout.addWidget(ok_btn)
+
         layout.addLayout(btn_layout)
 
     def get_width(self):
-        return self.width_spin.value()
+        """
+        Returns the entered width as a float.
+        Thanks to QDoubleValidator, input is guaranteed to be valid float > 0
+        if the field is not empty.
+        """
+        text = self.width_input.text().strip()
+        if not text:
+            return None
+        try:
+            value = float(text)
+            return value if value > 0 else None
+        except ValueError:
+            return None  # This should never happen due to validator
 
 
 # =======================================================================================================================================

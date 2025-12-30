@@ -116,18 +116,18 @@ class PointCloudViewer(ApplicationUI):
         self.canvas.setFocusPolicy(Qt.StrongFocus)
         self.canvas.setFocus()  # Optional: give focus automatically
 
-        # Per-baseline width storage (independent for each type)
-        self.baseline_widths = {
-            'surface': 10.0,
-            'construction': 20.0,
-            'road_surface': 10.0,
-            'deck_line': 10.0,
-            'projection_line': 10.0,
-            'material': 10.0,
-        }
 
+        # # Per-baseline width storage - ONLY stores user-confirmed widths
+        # self.baseline_widths = {
+        #     'surface': 0.0,
+        #     'construction': 0.0,
+        #     'road_surface': 0.0,
+        #     'deck_line': 0.0,
+        #     'projection_line': 0.0,
+        #     'material': 0.0,
+        # }
 
-
+        self.baseline_widths = {}  # Add this in your __init__
         # Connect signals
         self.connect_signals()
 
@@ -448,8 +448,19 @@ class PointCloudViewer(ApplicationUI):
         category = data["worksheet_category"]  # "Road", "Bridge", "Other", "None"
         worksheet_type = data["worksheet_type"]  # "Design" or "Measurement"
         dimension = "2D" if worksheet_type == "Design" else "3D"
-        initial_layer_name = data["initial_layer_name"].strip()  # User-entered layer name
-        point_cloud_file = data.get("point_cloud_file")
+        initial_layer_name = data["initial_layer_name"].strip()
+        point_cloud_file = data.get("point_cloud_file")  # Full path or None
+
+        # Determine point cloud filename for config
+        pc_filename = os.path.basename(point_cloud_file) if point_cloud_file else "None"
+
+        # Determine reference type and line
+        ref_type = category if category in ["Road", "Bridge", "Other"] else "None"
+        ref_line = None
+        if category in ["Road", "Bridge"]:
+            available_lines = ["Road_Layer_1", "Road_Layer_2", "Road_Layer_3"] if category == "Road" \
+                              else ["Bridge_Layer_1", "Bridge_Layer_2", "Bridge_Layer_3"]
+            ref_line = available_lines[0] if available_lines else None
 
         # Create main worksheet folder
         worksheet_folder = os.path.join(self.WORKSHEETS_BASE_DIR, worksheet_name)
@@ -463,34 +474,48 @@ class PointCloudViewer(ApplicationUI):
             if reply == QMessageBox.No:
                 return
 
-        # === NEW LOGIC: Create 'designs' or 'measurements' based on dimension ===
+        # Create designs or measurements folder
         if dimension == "2D":
             base_subfolder = os.path.join(worksheet_folder, "designs")
             self.message_text.append("   → Creating 'designs' folder for 2D Design mode")
-        else:  # 3D
+        else:
             base_subfolder = os.path.join(worksheet_folder, "measurements")
             self.message_text.append("   → Creating 'measurements' folder for 3D Measurement mode")
 
-        try:
-            os.makedirs(base_subfolder, exist_ok=True)
-        except Exception as e:
-            self.message_text.append(f"   → Warning: Could not create subfolder '{os.path.basename(base_subfolder)}': {str(e)}")
+        os.makedirs(base_subfolder, exist_ok=True)
 
-        # === Create initial layer folder inside the correct subfolder (only if layer name provided) ===
+        # Create initial layer folder if name provided
         layer_folder = None
         if initial_layer_name:
             layer_folder = os.path.join(base_subfolder, initial_layer_name)
-            try:
-                os.makedirs(layer_folder, exist_ok=True)
-                self.message_text.append(f"   → Initial layer folder created: {initial_layer_name}")
-                self.message_text.append(f"      Path: {layer_folder}")
-            except Exception as e:
-                self.message_text.append(f"   → Error creating layer folder '{initial_layer_name}': {str(e)}")
-                layer_folder = None
+            os.makedirs(layer_folder, exist_ok=True)
+            self.message_text.append(f"   → Initial layer folder created: {initial_layer_name}")
+            self.message_text.append(f"      Path: {layer_folder}")
+
+            # === SAVE design_layer_config.txt for initial layer (only if 2D) ===
+            if dimension == "2D":
+                full_config = {
+                    "layer_name": initial_layer_name,
+                    "dimension": dimension,
+                    "reference_type": ref_type,
+                    "reference_line": ref_line or "None",
+                    "project_name": project_name or "None",
+                    "worksheet_name": worksheet_name,
+                    "point_cloud_file": pc_filename,
+                    "created_by": self.current_user,
+                    "created_at": datetime.now().isoformat(),
+                }
+                config_file_path = os.path.join(layer_folder, "design_layer_config.txt")
+                try:
+                    with open(config_file_path, 'w', encoding='utf-8') as f:
+                        json.dump(full_config, f, indent=4)
+                    self.message_text.append("   → design_layer_config.txt saved for initial layer")
+                except Exception as e:
+                    self.message_text.append(f"   → Failed to save design_layer_config.txt: {str(e)}")
         else:
             self.message_text.append("   → No layer name entered — no initial layer folder created")
 
-        # Save worksheet config
+        # Save worksheet-level config
         config_data = {
             "worksheet_name": worksheet_name,
             "project_name": project_name or "None",
@@ -511,125 +536,74 @@ class PointCloudViewer(ApplicationUI):
             QMessageBox.critical(self, "Save Failed", f"Could not save worksheet config:\n{str(e)}")
             return
 
-        # Update application state
+        # Update app state
         self.current_worksheet_name = worksheet_name
         self.current_project_name = project_name
         self.current_worksheet_data = config_data.copy()
         self.display_current_worksheet(config_data)
 
-        # Add initial layer to left panel (if name was provided)
         if initial_layer_name:
             self.add_layer_to_panel(initial_layer_name, dimension)
 
         self.current_layer_name = initial_layer_name
 
-        # Show/Hide 3D vs 2D sections
+        # UI visibility logic (same as before)
         if dimension == "3D":
             self.three_D_frame.setVisible(True)
             self.two_D_frame.setVisible(False)
-            self.message_text.append("→ 3D Layers section shown, 2D Layers hidden (Measurement mode)")
         elif dimension == "2D":
             self.three_D_frame.setVisible(False)
             self.two_D_frame.setVisible(True)
-            self.message_text.append("→ 2D Layers section shown, 3D Layers hidden (Design mode)")
 
-        # Log messages
-        self.message_text.append(f"Worksheet '{worksheet_name}' created successfully!")
-        self.message_text.append(f"   → Path: {worksheet_folder}")
-        self.message_text.append(f"   → Type: {worksheet_type} ({dimension})")
-        self.message_text.append(f"   → Category: {category}")
-
-        if point_cloud_file:
-            self.message_text.append(f"   → Point Cloud Linked: {os.path.basename(point_cloud_file)}")
-        else:
-            self.message_text.append(f"   → Point Cloud: None selected")
-
-        # Baseline logic (Road/Bridge)
-        ref_type = None
-        ref_line = None
-        if category in ["Road", "Bridge"]:
-            ref_type = category
-            available_lines = ["Road_Layer_1", "Road_Layer_2", "Road_Layer_3"] if category == "Road" \
-                              else ["Bridge_Layer_1", "Bridge_Layer_2", "Bridge_Layer_3"]
-            ref_line = available_lines[0] if available_lines else None
-
-            self.message_text.append(f"   → Baseline Type: {ref_type}")
-            if ref_line:
-                self.message_text.append(f"   → Reference Baseline: {ref_line}")
-
-        # UI updates based on category
         self.bottom_section.setVisible(category in ["Road", "Bridge"])
 
-        # Hide all containers first
-        self.surface_container.setVisible(False)
-        self.construction_container.setVisible(False)
-        self.road_surface_container.setVisible(False)
-        self.zero_container.setVisible(False)
-        self.deck_line_container.setVisible(False)
-        self.projection_container.setVisible(False)
-        self.construction_dots_container.setVisible(False)
-        self.bridge_zero_container.setVisible(False)
+        # Hide all containers
+        for container in [self.surface_container, self.construction_container, self.road_surface_container,
+                          self.zero_container, self.deck_line_container, self.projection_container,
+                          self.construction_dots_container, getattr(self, 'bridge_zero_container', None)]:
+            if container:
+                container.setVisible(False)
 
         if category == "Road":
             self.surface_container.setVisible(True)
             self.construction_container.setVisible(True)
             self.road_surface_container.setVisible(True)
             self.zero_container.setVisible(True)
-            self.message_text.append(f"Mode Activated: {dimension} - ROAD Mode")
         elif category == "Bridge":
             self.deck_line_container.setVisible(True)
             self.projection_container.setVisible(True)
             self.construction_dots_container.setVisible(True)
             if hasattr(self, 'bridge_zero_container'):
                 self.bridge_zero_container.setVisible(True)
-            self.message_text.append(f"Mode Activated: {dimension} - BRIDGE Mode")
-        else:
-            self.message_text.append(f"Mode Activated: {dimension} - General Mode")
 
-        if ref_line:
-            self.message_text.append(f"Reference Baseline Set: {ref_line}")
-
-        # Action buttons
+        # Buttons
         self.preview_button.setVisible(True)
         self.threed_map_button.setVisible(True)
         self.save_button.setVisible(True)
 
-        # Auto-check zero lines
         if not self.zero_line_set:
             self.zero_line.setChecked(True)
             if hasattr(self, 'bridge_zero_line'):
                 self.bridge_zero_line.setChecked(True)
 
-        # Refresh rendering
         self.canvas.draw()
         if hasattr(self, 'vtk_widget'):
             self.vtk_widget.GetRenderWindow().Render()
 
-        # Auto-load point cloud if selected
+        # Auto-load point cloud
         if point_cloud_file and os.path.exists(point_cloud_file):
             self.message_text.append("Auto-loading selected point cloud...")
             success = self.load_point_cloud_from_path(point_cloud_file)
-            if success:
-                self.message_text.append("Point cloud loaded successfully!")
-            else:
-                self.message_text.append("Failed to auto-load point cloud.")
-        elif point_cloud_file:
-            self.message_text.append(f"Selected point cloud file not found: {point_cloud_file}")
+            self.message_text.append("Point cloud loaded successfully!" if success else "Failed to auto-load point cloud.")
 
-        # Final success message
-        layer_display = initial_layer_name if initial_layer_name else "(none)"
-        layer_path_display = layer_folder if layer_folder else "(not created)"
-        pc_display = os.path.basename(point_cloud_file) if point_cloud_file else "None"
-
+        # Final message
         QMessageBox.information(self, "Success",
                                 f"Worksheet '{worksheet_name}' created successfully!\n\n"
                                 f"Dimension: {dimension} ({worksheet_type})\n"
-                                f"Initial Layer: {layer_display}\n"
-                                f"Layer Path: {layer_path_display}\n"
+                                f"Initial Layer: {initial_layer_name or '(none)'}\n"
                                 f"Mode: {category or 'General'}\n"
-                                f"Point Cloud: {pc_display}\n\n"
+                                f"Point Cloud: {pc_filename}\n\n"
                                 f"Saved in:\n{worksheet_folder}")
-
 # =======================================================================================================================================
     def display_current_worksheet(self, config_data):
         """
@@ -740,26 +714,29 @@ class PointCloudViewer(ApplicationUI):
             ref_type = config["reference_type"]
             ref_line = config["reference_line"]
 
-            # Build path inside current worksheet
+            # Get current point cloud filename (from worksheet config or current state)
+            pc_file = self.current_worksheet_data.get("point_cloud_file")
+            pc_filename = os.path.basename(pc_file) if pc_file else "None"
+
+            # Build path
             base_designs_path = os.path.join(self.WORKSHEETS_BASE_DIR, self.current_worksheet_name, "designs")
             layer_folder = os.path.join(base_designs_path, layer_name)
-
-            # Create folder (safe because we already checked in dialog)
             os.makedirs(layer_folder, exist_ok=True)
 
-            # Prepare full config data
+            # === EXACT SAME CONFIG STRUCTURE ===
             full_config = {
                 "layer_name": layer_name,
                 "dimension": dimension,
-                "reference_type": ref_type,
-                "reference_line": ref_line,
-                "project_name": getattr(self, 'current_project_name', 'None'),
+                "reference_type": ref_type or "None",
+                "reference_line": ref_line or "None",
+                "project_name": getattr(self, 'current_project_name', 'None') or "None",
                 "worksheet_name": self.current_worksheet_name,
+                "point_cloud_file": pc_filename,
                 "created_by": self.current_user,
                 "created_at": datetime.now().isoformat(),
             }
 
-            # Save config file
+            # Save config
             config_file_path = os.path.join(layer_folder, "design_layer_config.txt")
             try:
                 with open(config_file_path, 'w', encoding='utf-8') as f:
@@ -772,61 +749,49 @@ class PointCloudViewer(ApplicationUI):
                 self.message_text.append(f"New design layer created: {layer_name}")
                 self.message_text.append(f" → Path: {layer_folder}")
                 self.message_text.append(f" → Dimension: {dimension}")
+                self.message_text.append(f" → Point Cloud: {pc_filename}")
                 if ref_type:
-                    self.message_text.append(f" → Type: {ref_type} ({ref_line or 'No reference'})")
+                    self.message_text.append(f" → Reference Type: {ref_type} ({ref_line or 'No reference'})")
 
-                # Add to left panel
                 self.add_layer_to_panel(layer_name, dimension)
-                            # === ADD THIS LINE ===
                 self.current_layer_name = layer_name
 
             except Exception as e:
                 QMessageBox.critical(self, "Save Failed", f"Could not save design layer config:\n{str(e)}")
                 return
 
-            # === UI Updates ===
+            # UI updates (same as before)
             self.bottom_section.setVisible(True)
-            self.surface_container.setVisible(False)
-            self.construction_container.setVisible(False)
-            self.road_surface_container.setVisible(False)
-            self.zero_container.setVisible(False)
-            self.deck_line_container.setVisible(False)
-            self.projection_container.setVisible(False)
-            self.construction_dots_container.setVisible(False)
-            self.bridge_zero_container.setVisible(False)
+            for container in [self.surface_container, self.construction_container, self.road_surface_container,
+                              self.zero_container, self.deck_line_container, self.projection_container,
+                              self.construction_dots_container, getattr(self, 'bridge_zero_container', None)]:
+                if container:
+                    container.setVisible(False)
 
             if ref_type == "Road":
                 self.surface_container.setVisible(True)
                 self.construction_container.setVisible(True)
                 self.road_surface_container.setVisible(True)
                 self.zero_container.setVisible(True)
-                self.message_text.append(f"Design Layer Created: {dimension} - ROAD Mode")
             elif ref_type == "Bridge":
                 self.deck_line_container.setVisible(True)
                 self.projection_container.setVisible(True)
                 self.construction_dots_container.setVisible(True)
-                self.bridge_zero_container.setVisible(True)
-                self.message_text.append(f"Design Layer Created: {dimension} - BRIDGE Mode")
-            else:
-                self.message_text.append(f"Design Layer Created: {dimension} - No reference type selected")
+                if hasattr(self, 'bridge_zero_container'):
+                    self.bridge_zero_container.setVisible(True)
 
-            if ref_line:
-                self.message_text.append(f"Reference Line: {ref_line}")
-
-            # Show action buttons
             self.preview_button.setVisible(True)
             self.threed_map_button.setVisible(True)
             self.save_button.setVisible(True)
 
-            # Auto-check zero line
             if not self.zero_line_set:
                 self.zero_line.setChecked(True)
                 if hasattr(self, 'bridge_zero_line'):
                     self.bridge_zero_line.setChecked(True)
 
             self.canvas.draw()
-            self.vtk_widget.GetRenderWindow().Render()
-
+            if hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
 # =======================================================================================================================================
     def open_measurement_dialog(self):
         """Open the Measurement Configuration Dialog when New is clicked"""
@@ -1535,17 +1500,46 @@ class PointCloudViewer(ApplicationUI):
                 zero_loaded = self.load_zero_line_from_layer(full_layer_path)
 
         # ===============================================================
-        # Generate 3D planes
-        # ===============================================================
+        # Generate 3D planes — NOW USING EACH BASELINE'S OWN WIDTH
+        
         if self.zero_line_set and loaded_baselines:
-            last_width = 10.0
-            if loaded_baselines:
-                first_key = next(iter(loaded_baselines))
-                last_width = loaded_baselines[first_key].get("width_meters", 10.0)
-            self.last_plane_width = last_width
-            self.map_baselines_to_3d_planes_from_data(loaded_baselines, last_width)
-            self.message_text.append(f"Generated 3D planes (width: {last_width:.2f}m)")
+            # Clear previous planes
+            self.clear_baseline_planes()
 
+            planes_generated = 0
+            width_summary = []
+
+            for ltype, baseline_data in loaded_baselines.items():
+                # Get the width saved in the JSON file (user-entered during previous session)
+                width_m = baseline_data.get("width_meters")
+
+                if width_m is None or width_m <= 0:
+                    self.message_text.append(f"Warning: Invalid width in {ltype}_baseline.json (found: {width_m}). Skipping 3D plane.")
+                    continue
+
+                # Restore this width into runtime so future edits/mapping use the correct value
+                self.baseline_widths[ltype] = float(width_m)
+
+                # Generate the 3D plane using the saved width
+                self.map_baselines_to_3d_planes_from_data({ltype: baseline_data})
+
+                planes_generated += 1
+                width_summary.append(f"{ltype.replace('_', ' ').title()}: {width_m:.2f} m")
+
+                self.message_text.append(f"Generated 3D plane for '{ltype}' → width {width_m:.2f} m (loaded from saved file)")
+
+            if planes_generated > 0:
+                width_list = "\n".join(width_summary)
+                self.message_text.append(f"Total 3D planes generated: {planes_generated}")
+                self.message_text.append(f"Widths loaded from saved baselines:\n{width_list}")
+            else:
+                self.message_text.append("Warning: No valid 3D planes generated (check widths in saved JSON files)")
+
+        else:
+            if not self.zero_line_set:
+                self.message_text.append("Zero line not loaded → cannot generate 3D planes")
+            if not loaded_baselines:
+                self.message_text.append("No baselines loaded → nothing to map to 3D")
         # ===============================================================
         # UI setup
         # ===============================================================
@@ -1587,21 +1581,20 @@ class PointCloudViewer(ApplicationUI):
         # Final summary
         self.message_text.append(f"Opened: {worksheet_name} → {subfolder_type}/{layer_name}")
         self.message_text.append(f"   • Baselines shown: {'All (solid)' if subfolder_type == 'designs' else f'{dotted_lines_drawn} reference(s) (dotted)'}")
-        self.message_text.append(f"   • 3D Planes: {len(loaded_baselines)}")
+        self.message_text.append(f"   • 3D Planes: {len(loaded_baselines)} (each with own width)")
         self.message_text.append(f"   • Zero Line: {'Loaded' if zero_loaded else 'Not loaded'}")
 
         QMessageBox.information(self, "Worksheet Opened",
                                 f"<b>{worksheet_name}</b>\n"
                                 f"Layer: <i>{layer_name}</i> ({subfolder_type})\n\n"
                                 f"2D View: {'All baselines' if subfolder_type == 'designs' else f'{dotted_lines_drawn} reference baseline(s) (dotted)'}\n"
-                                f"3D Planes: {len(loaded_baselines)} generated\n"
+                                f"3D Planes: {len(loaded_baselines)} generated (individual widths used)\n"
                                 f"Zero Line: {'Yes' if zero_loaded else 'No'}\n"
                                 f"Mode: {'Construction' if is_construction_layer else 'Design'}")
 
         self.canvas.draw_idle()
         if hasattr(self, 'vtk_widget'):
             self.vtk_widget.GetRenderWindow().Render()
-
 # ==========================================================================================================================================================
     def load_json_files_to_3d_pointcloud(self, folder_path):
         """
@@ -1884,15 +1877,14 @@ class PointCloudViewer(ApplicationUI):
         return loaded_baselines
     
 # ===========================================================================================================================================================
-    # Updated save_current_design_layer (same as previous, uses self.baseline_widths[ltype])
-    def save_current_design_layer(self):
-        """Save all currently drawn and checked baselines as JSON files with INDIVIDUAL widths."""
-        if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
-            QMessageBox.warning(self, "No Worksheet", "No active worksheet found. Create or open a worksheet first.")
-            return
 
+    def save_current_design_layer(self):
+        """Save checked baselines using the CURRENT user-confirmed width from dialog"""
+        if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
+            QMessageBox.warning(self, "No Worksheet", "No active worksheet.")
+            return
         if not hasattr(self, 'current_layer_name') or not self.current_layer_name:
-            QMessageBox.warning(self, "No Layer", "No active design layer. Please create a new design layer first.")
+            QMessageBox.warning(self, "No Layer", "No active design layer.")
             return
 
         layer_folder = os.path.join(
@@ -1901,13 +1893,11 @@ class PointCloudViewer(ApplicationUI):
             "designs",
             self.current_layer_name
         )
-
         if not os.path.exists(layer_folder):
             QMessageBox.critical(self, "Folder Missing", f"Design layer folder not found:\n{layer_folder}")
             return
-
         if not self.zero_line_set:
-            QMessageBox.warning(self, "Zero Line Required", "Zero line must be set before saving baselines.")
+            QMessageBox.warning(self, "Zero Line Required", "Zero line must be set.")
             return
 
         saved_count = 0
@@ -1928,19 +1918,27 @@ class PointCloudViewer(ApplicationUI):
         for ltype, checkbox in baseline_checkboxes.items():
             if not checkbox.isChecked():
                 continue
-
             polylines = self.line_types[ltype]['polylines']
             if not polylines:
                 continue
 
-            # Use individual width for this baseline
-            width_m = self.baseline_widths.get(ltype, 10.0)
+            # CRITICAL: Use the width entered by user in dialog
+            if ltype not in self.baseline_widths or self.baseline_widths[ltype] is None or self.baseline_widths[ltype] <= 0:
+                QMessageBox.warning(
+                    self,
+                    "Width Missing",
+                    f"No valid width entered for {ltype.replace('_', ' ').title()}.\n"
+                    "Please click 'Map on 3D' and enter width first."
+                )
+                continue
+
+            width_m = self.baseline_widths[ltype]  # This is the user-entered value (e.g., 20.0)
 
             baseline_data = {
                 "baseline_type": ltype.replace('_', ' ').title(),
                 "baseline_key": ltype,
                 "color": self.line_types[ltype]['color'],
-                "width_meters": float(width_m),  # Saved individually
+                "width_meters": float(width_m),  # ← This will now be 20.0, not 10.0
                 "zero_line_start": self.zero_start_point.tolist(),
                 "zero_line_end": self.zero_end_point.tolist(),
                 "zero_start_elevation": float(ref_z),
@@ -1948,6 +1946,7 @@ class PointCloudViewer(ApplicationUI):
                 "polylines": []
             }
 
+            # Convert polylines to 3D world coordinates
             for poly_2d in polylines:
                 poly_3d_points = []
                 for dist, rel_z in poly_2d:
@@ -1955,7 +1954,6 @@ class PointCloudViewer(ApplicationUI):
                     pos_along = self.zero_start_point + t * dir_vec
                     abs_z = ref_z + rel_z
                     world_point = [float(pos_along[0]), float(pos_along[1]), float(abs_z)]
-
                     poly_3d_points.append({
                         "chainage_m": float(dist),
                         "relative_elevation_m": float(rel_z),
@@ -1979,40 +1977,32 @@ class PointCloudViewer(ApplicationUI):
 
             try:
                 with open(json_path, 'w', encoding='utf-8') as f:
-                    json.dump(baseline_data, f, indent=4, ensure_ascii=False)
-
+                    json.dump(baseline_data, f, indent=4)
                 saved_count += 1
                 saved_files.append(json_filename)
-
             except Exception as e:
-                QMessageBox.critical(self, "Save Failed", f"Could not save {json_filename}:\n{str(e)}")
-                self.message_text.append(f"Error saving {ltype}: {str(e)}")
+                QMessageBox.critical(self, "Save Failed", f"Error saving {json_filename}:\n{str(e)}")
                 return
 
-        # Final feedback
         if saved_count > 0:
             file_list = "\n".join([f"• {f}" for f in saved_files])
-            self.message_text.append(f"Saved {saved_count} baseline(s) to design layer '{self.current_layer_name}':")
+            self.message_text.append(f"Saved {saved_count} baseline(s) to '{self.current_layer_name}':")
             self.message_text.append(file_list)
-            self.message_text.append(f"Location: {layer_folder}")
 
             QMessageBox.information(
                 self,
                 "Save Successful",
-                f"Successfully saved {saved_count} baseline(s):\n\n{file_list}\n\n"
-                f"Folder:\n{layer_folder}\n\n"
-                "You can now close or continue editing."
+                f"Saved {saved_count} baseline(s) with user-defined widths:\n\n{file_list}\n\n"
+                f"Location:\n{layer_folder}"
             )
         else:
-            QMessageBox.information(self, "Nothing to Save", "No checked baselines with drawn lines found to save.")
-            self.message_text.append("No baselines saved (none checked or drawn).")
+            QMessageBox.information(self, "Nothing to Save", "No checked baselines with drawn lines or valid widths.")
 
 # ===========================================================================================================================================================
-    # Updated map_baselines_to_3d_planes_from_data (no width param, uses per-baseline from data)
     def map_baselines_to_3d_planes_from_data(self, loaded_baselines):
-        """Regenerate 3D planes from loaded baseline data using their own saved widths."""
+        """Load saved JSON → regenerate planes → RESTORE saved width into runtime"""
         if not self.zero_line_set:
-            self.message_text.append("Zero line not set - cannot map to 3D.")
+            self.message_text.append("Zero line not set - cannot reload baselines.")
             return
 
         zero_dir_vec = self.zero_end_point - self.zero_start_point
@@ -2020,10 +2010,16 @@ class PointCloudViewer(ApplicationUI):
         ref_z = self.zero_start_z
 
         for ltype, baseline_data in loaded_baselines.items():
-            # Use width from loaded JSON
-            width = baseline_data.get("width_meters", 10.0)
-            half_width = width / 2.0
+            width = baseline_data.get("width_meters", None)
+            
+            if width is None or width <= 0:
+                self.message_text.append(f"Invalid width in loaded data for {ltype}. Skipping.")
+                continue
+            
+            # CRITICAL: Restore the saved width so future mapping/save uses correct value
+            self.baseline_widths[ltype] = width
 
+            half_width = width / 2.0
             rgba = self.plane_colors.get(ltype, (0.5, 0.5, 0.5, 0.4))
             color_rgb = rgba[:3]
             opacity = rgba[3]
@@ -2032,7 +2028,6 @@ class PointCloudViewer(ApplicationUI):
                 points_3d = poly["points"]
                 if len(points_3d) < 2:
                     continue
-
                 for i in range(len(points_3d) - 1):
                     pt1 = points_3d[i]
                     pt2 = points_3d[i + 1]
@@ -2055,9 +2050,8 @@ class PointCloudViewer(ApplicationUI):
                         horiz /= hlen
                         perp = np.array([-horiz[1], horiz[0], 0.0])
 
-                    perp_len = np.linalg.norm(perp)
-                    if perp_len > 0:
-                        perp /= perp_len
+                    if np.linalg.norm(perp) > 0:
+                        perp /= np.linalg.norm(perp)
 
                     c1 = center1 + perp * half_width
                     c2 = center1 - perp * half_width
@@ -2087,6 +2081,8 @@ class PointCloudViewer(ApplicationUI):
                     self.baseline_plane_actors.append(actor)
 
         self.vtk_widget.GetRenderWindow().Render()
+        self.message_text.append(f"Reloaded {len(loaded_baselines)} baseline(s) with saved widths.")
+
 
 # ===========================================================================================================================================================
     def show_graph_section(self, category):
@@ -5256,9 +5252,6 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append("No lines drawn to preview.")
             return
 
-        # # Clear road planes when previewing to avoid clutter
-        # self.clear_road_planes()
-
         # Clear previous preview actors
         for actor in self.preview_actors:
             self.renderer.RemoveActor(actor)
@@ -5301,25 +5294,22 @@ class PointCloudViewer(ApplicationUI):
 
 # =================================================================================================================================
 # MAP ROAD BASELINES TO 3D PLANES
+
     def map_baselines_to_3d_planes(self):
         """
-        Called when user clicks 'Map on 3D'.
-        - Prompts width for each CHECKED baseline (one dialog at a time, shows name).
-        - Uses individual width per baseline.
-        - Adds new planes incrementally (does NOT clear old ones).
+        User clicks 'Map on 3D' → forces user to enter width for each checked baseline.
+        NO DEFAULT WIDTH USED AT ALL. User must enter a valid width.
         """
         if not self.zero_line_set:
             QMessageBox.warning(self, "Zero Line Required", "Please set the Zero Line first.")
             return
 
-        # Map checkboxes to types
         baseline_checkboxes = {
             'surface': self.surface_baseline,
             'construction': self.construction_line,
             'road_surface': self.road_surface_line,
             'deck_line': self.deck_line,
             'projection_line': self.projection_line,
-            # Add 'material': your_material_checkbox if exists
         }
 
         checked_types = [ltype for ltype, cb in baseline_checkboxes.items() if cb.isChecked()]
@@ -5328,38 +5318,46 @@ class PointCloudViewer(ApplicationUI):
             QMessageBox.information(self, "Nothing Selected", "No baselines are checked for mapping.")
             return
 
-        # === Ask width for each checked baseline (one dialog per type) ===
+        # Force user to enter width for each checked baseline
         for ltype in checked_types:
-            dialog = RoadPlaneWidthDialog(self)
+            current_width = self.baseline_widths.get(ltype)  # May be None or previous value
+
+            dialog = RoadPlaneWidthDialog(current_width=current_width, parent=self)
             display_name = ltype.replace('_', ' ').title()
             dialog.setWindowTitle(f"Enter Width for {display_name} Baseline")
 
-            # Pre-fill with current known width
-            current_width = self.baseline_widths.get(ltype, 10.0)
-            dialog.width_spin.setValue(current_width)
-
             if dialog.exec_() != QDialog.Accepted:
-                self.message_text.append(f"Mapping cancelled for {display_name}.")
-                return  # Cancel entire process if user cancels any dialog
+                self.message_text.append(f"✗ Mapping cancelled for {display_name}.")
+                continue
 
             width = dialog.get_width()
-            self.baseline_widths[ltype] = width
-            self.message_text.append(f"Width set → {display_name}: {width:.2f} m")
+            if width is None or width <= 0:
+                QMessageBox.warning(self, "Invalid Width", f"Please enter a valid width greater than 0 for {display_name}.")
+                continue  # Skip this baseline
 
-        # === Collect current drawn polylines only from checked types ===
+            self.baseline_widths[ltype] = width
+            self.message_text.append(f"✓ Width confirmed → {display_name}: {width:.2f} m")
+
+        # Now collect only those with confirmed width
+        valid_types = [ltype for ltype in checked_types if self.baseline_widths.get(ltype) is not None]
+
+        if not valid_types:
+            QMessageBox.information(self, "No Valid Widths", "No baselines have a valid width entered. Mapping aborted.")
+            return
+
+        # Proceed to generate planes only for valid ones
         current_polylines = {}
         total_new_segments = 0
-        for ltype in checked_types:
+        for ltype in valid_types:
             polylines = self.line_types[ltype]['polylines']
             if polylines:
                 current_polylines[ltype] = polylines
                 total_new_segments += sum(len(p) - 1 for p in polylines if len(p) >= 2)
 
         if total_new_segments == 0:
-            QMessageBox.information(self, "No New Data", "No new line segments to map. Draw lines first.")
+            QMessageBox.information(self, "No Data", "No line segments found in selected baselines.")
             return
 
-        # === Create planes using individual widths ===
         zero_dir_vec = self.zero_end_point - self.zero_start_point
         zero_length = self.total_distance
         ref_z = self.zero_start_z
@@ -5379,7 +5377,6 @@ class PointCloudViewer(ApplicationUI):
             for poly_2d in polylines:
                 if len(poly_2d) < 2:
                     continue
-
                 for i in range(len(poly_2d) - 1):
                     dist1, rel_z1 = poly_2d[i]
                     dist2, rel_z2 = poly_2d[i + 1]
@@ -5438,26 +5435,20 @@ class PointCloudViewer(ApplicationUI):
                     self.baseline_plane_actors.append(actor)
                     plane_count_this_time += 1
 
-        # Render and feedback
         self.vtk_widget.GetRenderWindow().Render()
 
-        total_planes = len(self.baseline_plane_actors)
         width_list = "\n".join(width_summary)
-
-        self.message_text.append(f"Added {plane_count_this_time} new plane segments.")
-        self.message_text.append(f"Widths used:\n{width_list}")
+        self.message_text.append(f"Successfully mapped {plane_count_this_time} plane segments to 3D.")
+        self.message_text.append(f"Widths applied:\n{width_list}")
 
         QMessageBox.information(
             self,
             "Mapping Complete",
-            f"Successfully added {plane_count_this_time} new plane segments.\n\n"
-            f"Widths applied:\n{width_list}\n\n"
-            f"Total planes visible: {total_planes}\n\n"
-            "You can draw more lines and click 'Map on 3D' again — "
-            "new planes will be added on top of existing ones.\n\n"
-            "Remember to click 'Save' to permanently store baselines with these widths."
+            f"Added {plane_count_this_time} plane segments using user-defined widths.\n\n"
+            f"Widths used:\n{width_list}\n\n"
+            "Click 'Save' to store these baselines permanently with the entered widths."
         )
-# ===========================================================================================================================================================
+    # ===========================================================================================================================================================
     def clear_baseline_planes(self):
         """Remove ALL accumulated baseline plane actors — used only on reset or new worksheet."""
         for actor in self.baseline_plane_actors:
@@ -5681,138 +5672,6 @@ class PointCloudViewer(ApplicationUI):
             self.slider_marker_actor = None
             self.vtk_widget.GetRenderWindow().Render()
 
-# ============================================================================================================================
-
-    def save_current_design_layer(self):
-        """Save all currently drawn and checked baselines as JSON files in the current design layer folder."""
-        if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
-            QMessageBox.warning(self, "No Worksheet", "No active worksheet found. Create or open a worksheet first.")
-            return
-
-        if not hasattr(self, 'current_layer_name') or not self.current_layer_name:
-            QMessageBox.warning(self, "No Layer", "No active design layer. Please create a new design layer first.")
-            return
-
-        # Get the design layer folder
-        layer_folder = os.path.join(
-            self.WORKSHEETS_BASE_DIR,
-            self.current_worksheet_name,
-            "designs",
-            self.current_layer_name
-        )
-
-        if not os.path.exists(layer_folder):
-            QMessageBox.critical(self, "Folder Missing", f"Design layer folder not found:\n{layer_folder}")
-            return
-
-        if not self.zero_line_set:
-            QMessageBox.warning(self, "Zero Line Required", "Zero line must be set before saving baselines.")
-            return
-
-        # Track what was saved
-        saved_count = 0
-        saved_files = []
-
-        # Direction vector and reference
-        dir_vec = self.zero_end_point - self.zero_start_point
-        zero_length = self.total_distance
-        ref_z = self.zero_start_z
-
-        # Last used width (we'll use the most recent one from mapping; fallback to 10.0)
-        last_width = getattr(self, 'last_plane_width', 10.0)
-
-        # Define baseline types to save (only if checkbox is checked)
-        baseline_checkboxes = {
-            'surface': self.surface_baseline,
-            'construction': self.construction_line,
-            'road_surface': self.road_surface_line,
-            'deck_line': self.deck_line,
-            'projection_line': self.projection_line,
-        }
-
-        for ltype, checkbox in baseline_checkboxes.items():
-            if not checkbox.isChecked():
-                continue
-
-            polylines = self.line_types[ltype]['polylines']
-            if not polylines:
-                continue
-
-            # Prepare data structure
-            baseline_data = {
-                "baseline_type": ltype.replace('_', ' ').title(),
-                "baseline_key": ltype,
-                "color": self.line_types[ltype]['color'],
-                "width_meters": last_width,
-                "zero_line_start": self.zero_start_point.tolist(),
-                "zero_line_end": self.zero_end_point.tolist(),
-                "zero_start_elevation": float(ref_z),
-                "total_chainage_length": float(zero_length),
-                "polylines": []
-            }
-
-            # Convert each polyline
-            for poly_2d in polylines:
-                poly_3d_points = []
-                for dist, rel_z in poly_2d:
-                    t = dist / zero_length
-                    pos_along = self.zero_start_point + t * dir_vec
-                    abs_z = ref_z + rel_z
-                    world_point = [float(pos_along[0]), float(pos_along[1]), float(abs_z)]
-
-                    poly_3d_points.append({
-                        "chainage_m": float(dist),
-                        "relative_elevation_m": float(rel_z),
-                        "world_coordinates": world_point
-                    })
-
-                if len(poly_3d_points) >= 2:
-                    start_chainage = poly_3d_points[0]["chainage_m"]
-                    end_chainage = poly_3d_points[-1]["chainage_m"]
-                    baseline_data["polylines"].append({
-                        "start_chainage_m": float(start_chainage),
-                        "end_chainage_m": float(end_chainage),
-                        "points": poly_3d_points
-                    })
-
-            if not baseline_data["polylines"]:
-                continue
-
-            # Save to JSON file named after baseline type
-            json_filename = f"{ltype}_baseline.json"
-            json_path = os.path.join(layer_folder, json_filename)
-
-            try:
-                with open(json_path, 'w', encoding='utf-8') as f:
-                    json.dump(baseline_data, f, indent=4, ensure_ascii=False)
-
-                saved_count += 1
-                saved_files.append(json_filename)
-
-            except Exception as e:
-                QMessageBox.critical(self, "Save Failed", f"Could not save {json_filename}:\n{str(e)}")
-                self.message_text.append(f"Error saving {ltype}: {str(e)}")
-                return
-
-        # Final feedback
-        if saved_count > 0:
-            file_list = "\n".join([f"• {f}" for f in saved_files])
-            self.message_text.append(f"Saved {saved_count} baseline(s) to design layer '{self.current_layer_name}':")
-            self.message_text.append(file_list)
-            self.message_text.append(f"Location: {layer_folder}")
-
-            QMessageBox.information(
-                self,
-                "Save Successful",
-                f"Successfully saved {saved_count} baseline(s):\n\n{file_list}\n\n"
-                f"Folder:\n{layer_folder}\n\n"
-                "You can now close or continue editing."
-            )
-        else:
-            QMessageBox.information(self, "Nothing to Save", "No checked baselines with drawn lines found to save.")
-            self.message_text.append("No baselines saved (none checked or drawn).")
-
-
 # ==============================================================================================================================================
     def open_zero_line_dialog(self, auto_opened=False):
             """Open Zero Line Configuration Dialog — called manually or automatically"""
@@ -5914,8 +5773,8 @@ class PointCloudViewer(ApplicationUI):
 
         # If we have a current construction layer
         if hasattr(self, 'current_layer_name') and self.current_layer_name:
-            # Assuming construction layers are inside "construction" subfolder
-            layer_path = os.path.join(worksheet_path, "construction", self.current_layer_name)
+            # Assuming construction layers are inside "designs" subfolder
+            layer_path = os.path.join(worksheet_path, "designs", self.current_layer_name)
             if os.path.exists(layer_path):
                 return layer_path
             else:
@@ -5964,7 +5823,7 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(error_msg)
             QMessageBox.critical(self, "Save Failed", error_msg)
             return False
-
+        
 # =====================================================================================================================
     def format_chainage(self, x, for_dialog=False):
         """
