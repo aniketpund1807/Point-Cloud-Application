@@ -127,6 +127,14 @@ class PointCloudViewer(ApplicationUI):
         #     'material': 0.0,
         # }
 
+        # === MATERIAL LINE DRAWING STATE (NEW WORKFLOW) ===
+        self.material_drawing_active = False                    # True only when Start is pressed
+        self.material_drawing_points = []                       # Points currently being drawn
+        self.current_material_line_artist = None                # Dashed preview line
+        self.material_segment_labels = {}                       # {mat_idx: [label1, label2, ...]}
+        self.active_material_index = None                       # Currently selected material line index
+        self.material_polylines_artists = {}                    # Permanent saved lines {idx: [line1, line2]}
+
         self.baseline_widths = {}  # Add this in your __init__
         # Connect signals
         self.connect_signals()
@@ -4307,6 +4315,9 @@ class PointCloudViewer(ApplicationUI):
    
         self.volume_slider.valueChanged.connect(self.volume_changed)
 
+        # Connect the Start/Stop button in the zoom toolbar to material drawing
+        self.start_stop_button.toggled.connect(self.on_material_drawing_toggle)
+
         # # Connect graph click for drawing new points (construction, material, etc.)
         if hasattr(self, 'canvas') and self.canvas:
             self.graph_click_id = self.canvas.mpl_connect('button_press_event', self.on_graph_click)
@@ -4887,6 +4898,10 @@ class PointCloudViewer(ApplicationUI):
             # Redraw canvas
             self.canvas.draw()
             self.figure.tight_layout()
+
+            self.clear_baseline_planes()
+            self.clear_reference_lines()          # Clear previous 2D lines
+            self.clear_reference_actors()         # Clear previous 3D actors
             
             # Reset the checkbox for this line type
             if active_type_name == 'construction':
@@ -5472,13 +5487,13 @@ class PointCloudViewer(ApplicationUI):
             elif state == Qt.WindowMinimized:
                 pass # No specific action needed for minimize
 
-# =================================================================================================================================
+# =============================================================================================================================================================
     def resizeEvent(self, event):
         super(PointCloudViewer, self).resizeEvent(event)
         if self.vtk_widget:
             self.vtk_widget.GetRenderWindow().Render()
 
-# =================================================================================================================================
+# =============================================================================================================================================================
     def load_point_cloud_from_path(self, file_path: str):
         """
         Load a point cloud from a given file path without showing QFileDialog.
@@ -5672,7 +5687,7 @@ class PointCloudViewer(ApplicationUI):
             self.slider_marker_actor = None
             self.vtk_widget.GetRenderWindow().Render()
 
-# ==============================================================================================================================================
+# =============================================================================================================================================================
     def open_zero_line_dialog(self, auto_opened=False):
             """Open Zero Line Configuration Dialog — called manually or automatically"""
             # Pass current values if already set
@@ -5824,7 +5839,7 @@ class PointCloudViewer(ApplicationUI):
             QMessageBox.critical(self, "Save Failed", error_msg)
             return False
         
-# =====================================================================================================================
+# ===========================================================================================================================================================
     def format_chainage(self, x, for_dialog=False):
         """
         Convert chainage in meters to KM+Interval format.
@@ -5859,56 +5874,55 @@ class PointCloudViewer(ApplicationUI):
 # MODIFY toggle_material_line_visibility() IN pointcloudviewer.py
 # =======================================================================================================================================
     def toggle_material_line_visibility(self, index, state):
-        """Toggle visibility and activate drawing mode for material line"""
+        """Activate/deactivate a material line — drawing requires 'Start' button"""
         if 0 <= index < len(self.material_items):
             item = self.material_items[index]
             is_visible = state == Qt.Checked
             item['data']['visible'] = is_visible
-            
+
             if index < len(self.material_configs):
                 self.material_configs[index]['visible'] = is_visible
 
             if is_visible:
-                # Activate this line for drawing
                 self.active_material_index = index
                 self.active_line_type = 'material'
+                self.material_drawing_active = False
 
-                # Clear only the temporary preview (not permanent lines)
+                # Clear any ongoing preview
                 if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
                     self.current_material_line_artist.remove()
                     self.current_material_line_artist = None
                 self.material_drawing_points = []
 
                 self.message_text.append(
-                    f"Material line M{index+1} activated.\n"
-                    "• Left-click to add points\n"
-                    "• Press ESC to finish and open dialog\n"
-                    "• Right-click to cancel current line"
+                    f"Material line M{index+1} ACTIVATED.\n"
+                    "→ Click the green 'START' button (bottom toolbar) to begin drawing.\n"
+                    "→ Left-click: add points | Right-click: undo last | Click 'STOP' to finish"
                 )
 
-                # === REDRAW ALL SAVED POLYLINES FOR THIS MATERIAL INDEX ===
+                # Show previously saved permanent lines
                 if index in self.material_polylines_artists:
                     for artist in self.material_polylines_artists[index]:
-                        if artist not in self.ax.lines:  # Avoid duplicates
+                        if artist not in self.ax.lines:
                             self.ax.add_line(artist)
 
-                # Connect key press (only once)
-                if not hasattr(self, 'material_key_press_id'):
-                    self.material_key_press_id = self.canvas.mpl_connect('key_press_event', self.on_material_key_press)
-
             else:
-                # Deactivate if this was the active one
+                # Deactivate
                 if self.active_material_index == index:
                     self.active_material_index = None
                     self.active_line_type = None
+                    self.material_drawing_active = False
 
-                    # Clear temporary preview
+                    # Force Stop if drawing was active
+                    if self.start_stop_button.isChecked():
+                        self.start_stop_button.setChecked(False)
+
+                    # Clear preview
                     if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
                         self.current_material_line_artist.remove()
                         self.current_material_line_artist = None
-                    self.material_drawing_points = []
 
-                # === HIDE ALL SAVED LINES FOR THIS MATERIAL ===
+                # Hide saved lines
                 if index in self.material_polylines_artists:
                     for artist in self.material_polylines_artists[index]:
                         if artist in self.ax.lines:
@@ -5917,6 +5931,7 @@ class PointCloudViewer(ApplicationUI):
                 self.message_text.append(f"Material line M{index+1} deactivated.")
 
             self.canvas.draw_idle()
+
     # =====================================================================
     # NEW: Handle ESC key to finish material line drawing
     # =====================================================================
@@ -5929,48 +5944,89 @@ class PointCloudViewer(ApplicationUI):
                 self.message_text.append("Need at least 2 points to finish material segment.")
 
     # =====================================================================
-    # UPDATED: on_material_draw_click – handles only left-click and right-click (cancel)
-    # =====================================================================
     def on_material_draw_click(self, event):
-        """Handle mouse clicks for material line drawing (preview only)"""
-        if event.inaxes != self.ax or self.active_material_index is None:
+        """Handle mouse clicks only when material drawing is active"""
+        if not self.material_drawing_active or event.inaxes != self.ax:
             return
 
         x, y = event.xdata, event.ydata
         if x is None or y is None or not (0 <= x <= self.total_distance):
             return
 
-        if event.button == 1:  # Left click
+        idx = self.active_material_index
+
+        if event.button == 1:  # Left click — add point
             self.material_drawing_points.append((x, y))
 
-            # Remove old preview
+            # Update preview
             if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
                 self.current_material_line_artist.remove()
 
             xs = [p[0] for p in self.material_drawing_points]
             ys = [p[1] for p in self.material_drawing_points]
-
-            # Draw new preview
             self.current_material_line_artist = self.ax.plot(
-                xs, ys,
-                color='orange',
-                linewidth=3,
-                linestyle='--',  # dashed preview
-                alpha=0.7
+                xs, ys, color='orange', linewidth=3, linestyle='--', alpha=0.7
             )[0]
 
-            self.canvas.draw_idle()
-            self.message_text.append(f"Point added at {self.format_chainage(x)}")
+            # Add segment label if ≥2 points
+            if len(self.material_drawing_points) >= 2:
+                prev_x, prev_y = self.material_drawing_points[-2]
+                mid_x = (prev_x + x) / 2
+                mid_y = max(prev_y, y) + 0.2
+                seg_num = len(self.material_drawing_points) - 1
+                label_text = f"M{idx+1}-{seg_num}"
 
-        elif event.button == 3:  # Right click → cancel current
+
+                annot = self.ax.annotate(
+                    label_text, (mid_x, mid_y),
+                    xytext=(0, 10),
+                    textcoords='offset points',
+                    ha='center',
+                    fontsize=9,
+                    fontweight='bold',
+                    color='white',
+                    bbox=dict(boxstyle='round,pad=0.4', facecolor='orange', alpha=0.9, edgecolor='darkorange'),
+                    picker=10  # Fix: Use 'picker=10' for pick radius (replaces any 'pickradius')
+                )
+
+                annot.point_data = {
+                    'type': 'material_segment_label',
+                    'material_index': idx,
+                    'segment_number': seg_num,
+                    'from_chainage_m': prev_x,
+                    'to_chainage_m': x,
+                    'config': {}
+                }
+
+                if idx not in self.material_segment_labels:
+                    self.material_segment_labels[idx] = []
+                self.material_segment_labels[idx].append(annot)
+
+            self.message_text.append(f"Point added at {self.format_chainage(x)}")
+            self.canvas.draw_idle()
+
+        elif event.button == 3:  # Right click — undo
             if self.material_drawing_points:
-                self.material_drawing_points = []
+                self.material_drawing_points.pop()
+
+                # Remove last label
+                if idx in self.material_segment_labels and self.material_segment_labels[idx]:
+                    last_label = self.material_segment_labels[idx].pop()
+                    last_label.remove()
+
+                # Redraw preview
                 if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
                     self.current_material_line_artist.remove()
-                    self.current_material_line_artist = None
-                self.canvas.draw_idle()
-                self.message_text.append("Current drawing cancelled.")
 
+                if self.material_drawing_points:
+                    xs = [p[0] for p in self.material_drawing_points]
+                    ys = [p[1] for p in self.material_drawing_points]
+                    self.current_material_line_artist = self.ax.plot(
+                        xs, ys, color='orange', linewidth=3, linestyle='--', alpha=0.7
+                    )[0]
+
+                self.canvas.draw_idle()
+                self.message_text.append("Last point removed.")
 
 # ==================================================================
     def _get_material_line_points_for_segment(self, material_index, from_m, to_m):
@@ -6162,6 +6218,253 @@ class PointCloudViewer(ApplicationUI):
             self.material_drawing_points = []
             self.message_text.append("Material segment cancelled.")
             self.canvas.draw_idle()
+
+# =======================================================================================================================================
+    def on_material_drawing_toggle(self, checked):
+        """Handle clicks on Start/Stop button"""
+        if self.active_material_index is None:
+            if checked:
+                self.start_stop_button.setChecked(False)
+                self.message_text.append("⚠️ Please first check a Material Line box to select it.")
+            return
+
+        if checked:  # START
+            self.material_drawing_active = True
+            self.material_drawing_points = []
+
+            # Clear old preview
+            if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
+                self.current_material_line_artist.remove()
+                self.current_material_line_artist = None
+
+            # Clear old labels for this material (start fresh)
+            idx = self.active_material_index
+            if idx in self.material_segment_labels:
+                for label in self.material_segment_labels[idx]:
+                    label.remove()
+                self.material_segment_labels[idx] = []
+
+            self.message_text.append(
+                f"🟢 STARTED drawing Material M{idx+1}\n"
+                "• Left-click on graph to add points\n"
+                "• Right-click to remove last point\n"
+                "• Click 'STOP' when complete → dialog will open to configure the full segment"
+            )
+
+        else:  # STOP
+            self.material_drawing_active = False
+            self.finish_material_line_drawing()  # This now triggers dialog + full segment save
+
+# ================================================================================================================================================================
+
+    def finish_material_line_drawing(self):
+        """Called when STOP is clicked:
+        - Add points at every chainage interval
+        - Interpolate elevations
+        - Draw permanent line with markers at all points
+        - Place labels EXACTLY in the middle between points (never on points)
+        - Open dialog to configure the full material segment
+        """
+        if len(self.material_drawing_points) < 2:
+            if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
+                self.current_material_line_artist.remove()
+                self.current_material_line_artist = None
+            self.material_drawing_points = []
+            idx = self.active_material_index
+            if idx in self.material_segment_labels:
+                for label in self.material_segment_labels[idx]:
+                    label.remove()
+                self.material_segment_labels[idx] = []
+            self.message_text.append("Drawing cancelled — need at least 2 points.")
+            self.canvas.draw_idle()
+            return
+
+        idx = self.active_material_index
+
+        # 1. Sort drawn points by chainage
+        self.material_drawing_points.sort(key=lambda p: p[0])
+        drawn_xs = [p[0] for p in self.material_drawing_points]
+        drawn_ys = [p[1] for p in self.material_drawing_points]
+
+        min_x = drawn_xs[0]
+        max_x = drawn_xs[-1]
+
+        # 2. Snap to chainage intervals (e.g., every 20m)
+        import numpy as np
+        interval = getattr(self, 'zero_interval', 20.0)
+
+        # First interval >= start
+        first_target = np.ceil(min_x / interval) * interval
+        target_xs = np.arange(first_target, max_x + 1e-6, interval).tolist()
+
+        # Combine: keep actual start/end + all interval points
+        all_xs = sorted(set([min_x, max_x] + target_xs))
+        all_ys = np.interp(all_xs, drawn_xs, drawn_ys, left=drawn_ys[0], right=drawn_ys[-1])
+
+        # Update final points
+        self.material_drawing_points = list(zip(all_xs, all_ys))
+
+        # 3. Clean previous permanent lines
+        if idx in self.material_polylines_artists:
+            for line in self.material_polylines_artists[idx]:
+                if line in self.ax.lines:
+                    line.remove()
+            self.material_polylines_artists[idx] = []
+
+        # 4. Draw permanent orange line with markers at ALL points
+        xs = [p[0] for p in self.material_drawing_points]
+        ys = [p[1] for p in self.material_drawing_points]
+
+        permanent_line = self.ax.plot(
+            xs, ys,
+            color='orange',
+            linewidth=3,
+            linestyle='-',
+            marker='o',
+            markersize=6,
+            markerfacecolor='orange',
+            markeredgecolor='darkred',
+            alpha=0.9
+        )[0]
+
+        self.material_polylines_artists.setdefault(idx, []).append(permanent_line)
+
+        # 5. Remove old labels
+        if idx in self.material_segment_labels:
+            for label in self.material_segment_labels[idx]:
+                label.remove()
+            self.material_segment_labels[idx] = []
+
+        # 6. Add labels STRICTLY BETWEEN points → (N-1) labels for N points
+        self.material_segment_labels[idx] = []
+        num_points = len(self.material_drawing_points)
+
+        for i in range(num_points - 1):
+            prev_x, prev_y = self.material_drawing_points[i]
+            curr_x, curr_y = self.material_drawing_points[i + 1]
+
+            # Exact midpoint in x
+            mid_x = (prev_x + curr_x) / 2
+
+            # Place label slightly above the higher of the two points
+            mid_y = max(prev_y, curr_y) + 0.25  # Increased offset for better visibility
+
+            seg_num = i + 1
+            label_text = f"M{idx+1}-{seg_num}"
+
+            annot = self.ax.annotate(
+                label_text,
+                (mid_x, mid_y),
+                xytext=(0, 12),  # Offset upward in points
+                textcoords='offset points',
+                ha='center',
+                va='bottom',
+                fontsize=9,
+                fontweight='bold',
+                color='white',
+                bbox=dict(
+                    boxstyle='round,pad=0.4',
+                    facecolor='orange',
+                    alpha=0.9,
+                    edgecolor='darkorange'
+                ),
+                picker=10
+            )
+
+            annot.point_data = {
+                'type': 'material_segment_label',
+                'material_index': idx,
+                'segment_number': seg_num,
+                'from_chainage_m': prev_x,
+                'to_chainage_m': curr_x,
+                'config': {}
+            }
+
+            self.material_segment_labels[idx].append(annot)
+
+        # 7. Remove preview line
+        if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
+            self.current_material_line_artist.remove()
+            self.current_material_line_artist = None
+
+        self.canvas.draw_idle()
+
+        # 8. Prepare chainage for full segment dialog
+        from_chainage_str = self.format_chainage(min_x, for_dialog=True)
+        to_chainage_str = self.format_chainage(max_x, for_dialog=True)
+
+        # 9. Open dialog for the entire material line
+        dialog = MaterialSegmentDialog(
+            from_chainage=from_chainage_str,
+            to_chainage=to_chainage_str,
+            material_thickness=None,
+            width=None,
+            after_rolling=None,
+            parent=self
+        )
+        dialog.setWindowTitle(f"Configure Full Material Segment - M{idx+1}")
+
+        if dialog.exec_() == QDialog.Accepted:
+            config = dialog.get_data()
+            if config is None:
+                self.message_text.append("Configuration cancelled.")
+                self.canvas.draw_idle()
+                return
+
+            from_m = config.get('from_chainage_m')
+            to_m = config.get('to_chainage_m')
+            thickness_m = config.get('material_thickness_m', 0.0)
+
+            if from_m is None or to_m is None or to_m <= from_m:
+                QMessageBox.warning(self, "Invalid Range", "To chainage must be greater than From chainage.")
+                return
+
+            if thickness_m <= 0:
+                reply = QMessageBox.question(
+                    self, "Zero Thickness",
+                    "Material thickness is 0 m – used for documentation only.\nContinue?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if reply == QMessageBox.No:
+                    return
+
+            # Save all polyline points
+            polyline_points = [
+                {"chainage_m": round(x, 3), "relative_elevation_m": round(y, 3)}
+                for x, y in self.material_drawing_points
+            ]
+
+            self.save_material_segment_to_json(
+                material_idx=idx,
+                config=config,
+                from_m=from_m,
+                to_m=to_m,
+                point_number=None,
+                polyline_points=polyline_points
+            )
+
+            # Draw accurate filling
+            self.draw_material_filling(
+                from_chainage_m=from_m,
+                to_chainage_m=to_m,
+                thickness_m=thickness_m,
+                material_index=idx,
+                material_config=self.material_configs[idx],
+                color='#FF9800',
+                alpha=0.6
+            )
+
+            self.message_text.append(
+                f"Material M{idx+1} saved and filled!\n"
+                f"   Chainage: {self.format_chainage(from_m)} → {self.format_chainage(to_m)}\n"
+                f"   Points: {len(polyline_points)} | Segments: {len(polyline_points)-1}\n"
+                f"   Nominal thickness: {thickness_m*1000:.0f} mm"
+            )
+        else:
+            self.message_text.append("Material segment configuration cancelled.")
+
+        self.canvas.draw_idle()
+        self.material_drawing_points = []  # Clear after finish
 # =======================================================================================================================================
 # CONSOLIDATED: Single setup_label_click_handler (remove duplicates; use unified on_label_pick)
 # =======================================================================================================================================
@@ -6189,6 +6492,11 @@ class PointCloudViewer(ApplicationUI):
 
         artist = event.artist
         point_data = artist.point_data
+
+        # === MATERIAL SEGMENT LABEL CLICKED ===
+        if point_data.get('type') == 'material_segment_label':
+            self.on_material_segment_label_clicked(event.artist)
+            return
 
         # =====================================================================
         # Handle CONSTRUCTION dot click
@@ -6347,6 +6655,88 @@ class PointCloudViewer(ApplicationUI):
             else:
                 self.message_text.append(f"Material segment configuration cancelled for M{material_idx + 1}-{point_number}")
 
+
+# ==============================================================================================
+    def on_material_segment_label_clicked(self, artist):
+        """Handle click on material segment label → open dialog"""
+        point_data = artist.point_data
+        mat_idx = point_data['material_index']
+        from_m = point_data['from_chainage_m']
+        to_m = point_data['to_chainage_m']
+
+        from_str = self.format_chainage(from_m, for_dialog=True)
+        to_str = self.format_chainage(to_m, for_dialog=True)
+
+        current_config = point_data.get('config', {})
+
+        dialog = MaterialSegmentDialog(
+            from_chainage=from_str,
+            to_chainage=to_str,
+            material_thickness=current_config.get('material_thickness_m'),
+            width=current_config.get('width_m'),
+            after_rolling=current_config.get('after_rolling_thickness_m'),
+            parent=self
+        )
+        dialog.setWindowTitle(f"Material Segment Configuration - M{mat_idx + 1}")
+
+        if dialog.exec_() == QDialog.Accepted:
+            config = dialog.get_data()
+            if not config:
+                return
+
+            thickness_m = config.get('material_thickness_m', 0.0)
+
+            # Get full polyline points from permanent line
+            polyline_points = []
+            if mat_idx in self.material_polylines_artists and self.material_polylines_artists[mat_idx]:
+                line = self.material_polylines_artists[mat_idx][-1]
+                xs = line.get_xdata()
+                ys = line.get_ydata()
+                polyline_points = [
+                    {"chainage_m": round(x, 3), "relative_elevation_m": round(y, 3)}
+                    for x, y in zip(xs, ys)
+                ]
+
+            # Save to JSON
+            self.save_material_segment_to_json(
+                material_idx=mat_idx,
+                config=config,
+                from_m=from_m,
+                to_m=to_m,
+                point_number=None,
+                polyline_points=polyline_points
+            )
+
+            # Update label
+            new_text = f"M{mat_idx + 1}✓"
+            if thickness_m > 0:
+                new_text += f" ({thickness_m:.0f}mm)"
+            artist.set_text(new_text)
+            artist.set_bbox(dict(
+                boxstyle='round,pad=0.5',
+                facecolor='lightgreen',
+                alpha=0.9,
+                edgecolor='green',
+                linewidth=2
+            ))
+
+            # Draw filling
+            self.draw_material_filling(
+                from_chainage_m=from_m,
+                to_chainage_m=to_m,
+                thickness_m=thickness_m,
+                material_index=mat_idx,
+                material_config=self.material_configs[mat_idx],
+                color='#FF9800',
+                alpha=0.6
+            )
+
+            self.canvas.draw_idle()
+            self.message_text.append(
+                f"✅ Material segment M{mat_idx + 1} saved and filled:\n"
+                f"   {from_str} → {to_str}\n"
+                f"   Thickness: {thickness_m:.0f} mm"
+            )
 # ==============================================================================================================================
     def save_material_segment_to_json(self, material_idx, config, from_m, to_m, point_number=None, polyline_points=None):
         """
@@ -6661,13 +7051,13 @@ class PointCloudViewer(ApplicationUI):
         mid_x = np.mean(x_dense)
         mid_y = np.mean(bottom_y) + np.mean(computed_thicknesses) / 2  # Midpoint vertically
 
-        self.ax.text(mid_x, mid_y,
-                     f"M{material_index+1}\n{avg_thickness_mm:.0f}mm (avg)",
-                     ha='center', va='center', fontsize=10, fontweight='bold',
-                     color='black',
-                     bbox=dict(facecolor='white', alpha=0.95, edgecolor='none',
-                               boxstyle='round,pad=0.6'),
-                     zorder=5)
+        # self.ax.text(mid_x, mid_y,
+        #              f"M{material_index+1}\n{avg_thickness_mm:.0f}mm (avg)",
+        #              ha='center', va='center', fontsize=10, fontweight='bold',
+        #              color='black',
+        #              bbox=dict(facecolor='white', alpha=0.95, edgecolor='none',
+        #                        boxstyle='round,pad=0.6'),
+        #              zorder=5)
 
         # Store patches for potential cleanup later
         if not hasattr(self, 'material_fill_patches'):
@@ -6679,6 +7069,7 @@ class PointCloudViewer(ApplicationUI):
             f"✓ ACCURATE HATCHING DRAWN for M{material_index+1} "
             f"(variable {avg_thickness_mm:.0f} mm avg thick) – exactly between baseline and drawn material line"
         )
+
 # ==============================================================================================================================================
     def _load_baseline_from_design_layer(self, material_config):
         """
