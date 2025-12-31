@@ -309,11 +309,11 @@ class ApplicationUI(QMainWindow):
                 if btn.isChecked():
                     # close any other open dropdown first
                     for other in [self.worksheet_button, self.design_button,
-                                self.construction_button, self.measurement_button]:
+                                  self.construction_button, self.measurement_button,
+                                  self.earthwork_button, self.setting_button]:  # <-- added new buttons
                         if other is not btn and other.isChecked():
                             other.setChecked(False)
                             other.property("dropdown").hide()
-
                     # position exactly under the button
                     pos = btn.mapToGlobal(QPoint(0, btn.height()))
                     dropdown.move(pos)
@@ -379,6 +379,47 @@ class ApplicationUI(QMainWindow):
         # self.new_measurement_button.clicked.connect(self.open_measurement_dialog)
         top_layout.addWidget(self.measurement_button)
 
+
+        # ------------------------------------------------------------------
+        # NEW: Earthwork button + dropdown (only "Rolling")
+        # ------------------------------------------------------------------
+        self.earthwork_button = QPushButton("🌍 \n Earthwork")
+        self.earthwork_button.setFixedWidth(130)
+        self.earthwork_button.setCheckable(True)
+        self.earthwork_button.setStyleSheet("font-weight: bold;")
+
+        earthwork_dropdown = QWidget()
+        earthwork_dropdown.setWindowFlags(Qt.Popup)
+        earthwork_dd_layout = QVBoxLayout(earthwork_dropdown)
+        earthwork_dd_layout.setContentsMargins(4, 4, 4, 4)
+        earthwork_dd_layout.setSpacing(2)
+
+        self.rolling_button = QPushButton("Rolling")
+        self.rolling_button.setFixedHeight(40)
+        self.rolling_button.setFixedWidth(100)
+        earthwork_dd_layout.addWidget(self.rolling_button)
+
+        def toggle_earthwork():
+            if self.earthwork_button.isChecked():
+                # Close other dropdowns
+                for other in [self.worksheet_button, self.design_button,
+                              self.construction_button, self.measurement_button,
+                              self.setting_button]:
+                    if other.isChecked():
+                        other.setChecked(False)
+                        other.property("dropdown").hide()
+                pos = self.earthwork_button.mapToGlobal(QPoint(0, self.earthwork_button.height()))
+                earthwork_dropdown.move(pos)
+                earthwork_dropdown.show()
+                self.earthwork_button.setProperty("dropdown", earthwork_dropdown)
+            else:
+                earthwork_dropdown.hide()
+
+        self.earthwork_button.clicked.connect(toggle_earthwork)
+        earthwork_dropdown.installEventFilter(self)
+
+        top_layout.addWidget(self.earthwork_button)
+
         # ------------------------------------------------------------------
         # Other buttons (unchanged)
         # ------------------------------------------------------------------
@@ -397,9 +438,115 @@ class ApplicationUI(QMainWindow):
         # self.help_button.clicked.connect(self.show_help_dialog)
         top_layout.addWidget(self.help_button)
 
+        # ------------------------------------------------------------------
+        # UPDATED: Settings button with multi-level nested dropdowns
+        # ------------------------------------------------------------------
         self.setting_button = QPushButton("⚙ \n Settings")
         self.setting_button.setStyleSheet("font-weight: bold;")
         self.setting_button.setFixedWidth(110)
+        self.setting_button.setCheckable(True)
+
+        # Main Settings Dropdown
+        settings_dropdown = QWidget()
+        settings_dropdown.setWindowFlags(Qt.Popup)
+        settings_layout = QVBoxLayout(settings_dropdown)
+        settings_layout.setContentsMargins(4, 4, 4, 4)
+        settings_layout.setSpacing(2)
+
+        self.general_setting_btn = QPushButton("General Setting")
+        self.camera_setting_btn = QPushButton("Camera Setting ▶")
+
+        for btn in [self.general_setting_btn, self.camera_setting_btn]:
+            btn.setFixedHeight(40)
+            btn.setFixedWidth(160)
+            settings_layout.addWidget(btn)
+
+        # Sub-dropdown: Camera Settings (Angle, Zoom, View)
+        camera_sub_dropdown = QWidget()
+        camera_sub_dropdown.setWindowFlags(Qt.Popup)
+        camera_sub_layout = QVBoxLayout(camera_sub_dropdown)
+        camera_sub_layout.setContentsMargins(4, 4, 4, 4)
+        camera_sub_layout.setSpacing(2)
+
+        self.angle_btn = QPushButton("Angle")
+        self.zoom_btn = QPushButton("Zoom")
+        self.view_btn = QPushButton("View ▶")
+
+        for btn in [self.angle_btn, self.zoom_btn, self.view_btn]:
+            btn.setFixedHeight(40)
+            btn.setFixedWidth(140)
+            camera_sub_layout.addWidget(btn)
+
+        # Sub-sub-dropdown: View Options (Top, Left, Right)
+        view_sub_dropdown = QWidget()
+        view_sub_dropdown.setWindowFlags(Qt.Popup)
+        view_sub_layout = QVBoxLayout(view_sub_dropdown)
+        view_sub_layout.setContentsMargins(4, 4, 4, 4)
+        view_sub_layout.setSpacing(2)
+
+        self.top_view_btn = QPushButton("Top View")
+        self.left_side_btn = QPushButton("Left Side")
+        self.right_side_btn = QPushButton("Right Side")
+
+        for vbtn in [self.top_view_btn, self.left_side_btn, self.right_side_btn]:
+            vbtn.setFixedHeight(40)
+            vbtn.setFixedWidth(120)
+            view_sub_layout.addWidget(vbtn)
+
+        # Toggle View sub-dropdown (Top/Left/Right)
+        def toggle_view_sub():
+            if self.view_btn.isChecked():
+                pos = self.view_btn.mapToGlobal(QPoint(self.view_btn.width(), 0))
+                view_sub_dropdown.move(pos)
+                view_sub_dropdown.show()
+            else:
+                view_sub_dropdown.hide()
+
+        self.view_btn.setCheckable(True)
+        self.view_btn.clicked.connect(toggle_view_sub)
+
+        # Toggle Camera sub-dropdown (Angle, Zoom, View)
+        def toggle_camera_sub():
+            if self.camera_setting_btn.isChecked():
+                pos = self.camera_setting_btn.mapToGlobal(QPoint(self.camera_setting_btn.width(), 0))
+                camera_sub_dropdown.move(pos)
+                camera_sub_dropdown.show()
+                # Uncheck View to prevent overlap
+                self.view_btn.setChecked(False)
+                view_sub_dropdown.hide()
+            else:
+                camera_sub_dropdown.hide()
+                view_sub_dropdown.hide()
+                self.view_btn.setChecked(False)
+
+        self.camera_setting_btn.setCheckable(True)
+        self.camera_setting_btn.clicked.connect(toggle_camera_sub)
+
+        # Main Settings toggle
+        def toggle_settings():
+            if self.setting_button.isChecked():
+                # Close other main dropdowns
+                for other in [self.worksheet_button, self.design_button,
+                              self.construction_button, self.measurement_button,
+                              self.earthwork_button]:
+                    if other.isChecked():
+                        other.setChecked(False)
+                        if other.property("dropdown"):
+                            other.property("dropdown").hide()
+                pos = self.setting_button.mapToGlobal(QPoint(0, self.setting_button.height()))
+                settings_dropdown.move(pos)
+                settings_dropdown.show()
+                self.setting_button.setProperty("dropdown", settings_dropdown)
+            else:
+                settings_dropdown.hide()
+                camera_sub_dropdown.hide()
+                view_sub_dropdown.hide()
+                self.camera_setting_btn.setChecked(False)
+                self.view_btn.setChecked(False)
+
+        self.setting_button.clicked.connect(toggle_settings)
+        settings_dropdown.installEventFilter(self)
+
         top_layout.addWidget(self.setting_button)
 
         top_layout.addStretch()          # push everything to the left
