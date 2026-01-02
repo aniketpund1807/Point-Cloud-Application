@@ -135,6 +135,17 @@ class PointCloudViewer(ApplicationUI):
         self.active_material_index = None                       # Currently selected material line index
         self.material_polylines_artists = {}                    # Permanent saved lines {idx: [line1, line2]}
 
+
+        # ────────────────────────────────────────────────────────────────
+        #  IMPORTANT: Initialize storage dictionaries here
+        # ────────────────────────────────────────────────────────────────
+        self.material_fill_patches   = {}          # {material_idx: [{'bg': patch, 'hatch': patch}, ...]}
+        self.material_3d_actors      = {}          # {material_idx: [vtkActor, ...]}
+
+        # If you use these elsewhere, initialize them too
+        self.material_segments       = []          # optional – list of segment dicts
+        self.material_polylines      = {}
+        
         self.baseline_widths = {}  # Add this in your __init__
         # Connect signals
         self.connect_signals()
@@ -5838,7 +5849,7 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(error_msg)
             QMessageBox.critical(self, "Save Failed", error_msg)
             return False
-        
+
 # ===========================================================================================================================================================
     def format_chainage(self, x, for_dialog=False):
         """
@@ -5906,6 +5917,9 @@ class PointCloudViewer(ApplicationUI):
                         if artist not in self.ax.lines:
                             self.ax.add_line(artist)
 
+                # NEW: Load and draw saved filling, labels, and 3D plane
+                self.load_and_draw_material_filling(index)
+
             else:
                 # Deactivate
                 if self.active_material_index == index:
@@ -5927,6 +5941,26 @@ class PointCloudViewer(ApplicationUI):
                     for artist in self.material_polylines_artists[index]:
                         if artist in self.ax.lines:
                             artist.remove()
+
+                # NEW: Remove filling patches
+                if index in self.material_fill_patches:
+                    for patch_dict in self.material_fill_patches[index]:
+                        patch_dict['bg'].remove()
+                        patch_dict['hatch'].remove()
+                    del self.material_fill_patches[index]
+
+                # NEW: Remove segment labels
+                if index in self.material_segment_labels:
+                    for label in self.material_segment_labels[index]:
+                        label.remove()
+                    del self.material_segment_labels[index]
+
+                # NEW: Remove 3D actors
+                if index in self.material_3d_actors:
+                    for actor in self.material_3d_actors[index]:
+                        self.renderer.RemoveActor(actor)
+                    del self.material_3d_actors[index]
+                    self.vtkWidget.GetRenderWindow().Render()
 
                 self.message_text.append(f"Material line M{index+1} deactivated.")
 
@@ -6028,7 +6062,7 @@ class PointCloudViewer(ApplicationUI):
                 self.canvas.draw_idle()
                 self.message_text.append("Last point removed.")
 
-# =======================================================================================================================================
+# ==============================================================================================================================================================
     def _get_material_line_points_for_segment(self, material_index, from_m, to_m):
         """
         UPDATED & 100% WORKING: Handles BOTH old single-segment JSONs
@@ -6038,39 +6072,30 @@ class PointCloudViewer(ApplicationUI):
         if not hasattr(self, 'material_items') or not self.material_items:
             self.message_text.append("No material lines defined yet.")
             return [], []
-
         if material_index >= len(self.material_items):
             self.message_text.append(f"Material index {material_index} out of range.")
             return [], []
-
         target_item = self.material_items[material_index]
         folder_name = target_item.get('folder') or target_item.get('data', {}).get('folder_name')
-
         if not folder_name:
             self.message_text.append("Material folder name not found.")
             return [], []
-
         material_folder = os.path.join(self.current_construction_layer_path, folder_name)
         if not os.path.exists(material_folder):
             self.message_text.append(f"Material folder not found: {material_folder}")
             return [], []
-
         try:
             json_files = [f for f in os.listdir(material_folder)
                           if f.startswith("material_") and f.endswith(".json")]
             if not json_files:
                 self.message_text.append("No saved material segment found.")
                 return [], []
-
             latest_json = sorted(json_files, key=lambda x: os.path.getmtime(os.path.join(material_folder, x)))[-1]
             json_path = os.path.join(material_folder, latest_json)
-
             with open(json_path, 'r', encoding='utf-8') as f:
                 seg_data = json.load(f)
-
             # === CRITICAL FIX: Extract polyline points correctly ===
             all_poly_points = []
-
             if "segments" in seg_data and seg_data["segments"]:
                 # NEW FORMAT: collect points from ALL segments
                 for segment in seg_data["segments"]:
@@ -6084,26 +6109,20 @@ class PointCloudViewer(ApplicationUI):
             else:
                 self.message_text.append("No polyline_points found in JSON (neither in segments nor root).")
                 return [], []
-
             if len(all_poly_points) < 2:
                 self.message_text.append("Not enough polyline points saved to draw hatching.")
                 return [], []
-
             # Sort by chainage to be safe
             all_poly_points.sort(key=lambda p: p["chainage_m"])
-
             mat_xs = [p["chainage_m"] for p in all_poly_points]
             mat_ys = [p["relative_elevation_m"] for p in all_poly_points]
-
         except Exception as e:
             self.message_text.append(f"Error reading material JSON: {str(e)}")
             return [], []
-
         # Generate dense line for smooth hatching
         import numpy as np
         x_dense = np.linspace(from_m, to_m, 1500)
         y_dense = np.interp(x_dense, mat_xs, mat_ys, left=mat_ys[0], right=mat_ys[-1])
-
         self.message_text.append(f"✓ Hatching drawn using {len(mat_xs)} saved points")
         return x_dense.tolist(), y_dense.tolist()
 # =======================================================================================================================================
@@ -6208,7 +6227,8 @@ class PointCloudViewer(ApplicationUI):
                 material_index=material_idx,
                 material_config=self.material_configs[material_idx],
                 color='#FF9800',
-                alpha=0.6
+                alpha=0.6,
+                width_m=config.get('width_m', 0.0)  # NEW: Pass width for 3D visualization
             )
 
             self.message_text.append(f"Material segment M{material_idx+1} finished and filled.")
@@ -6444,7 +6464,8 @@ class PointCloudViewer(ApplicationUI):
                 material_index=idx,
                 material_config=self.material_configs[idx],
                 color='#FF9800',
-                alpha=0.6
+                alpha=0.6,
+                width_m=width_m  # NEW: Pass width for 3D visualization
             )
 
             total_segs = len(segments)
@@ -6617,7 +6638,8 @@ class PointCloudViewer(ApplicationUI):
                     material_index=material_idx,
                     material_config=self.material_configs[material_idx],
                     color='#FF9800',
-                    alpha=0.55
+                    alpha=0.55,
+                    width_m=config.get('width_m', 0.0)  # NEW: Pass width for 3D
                 )
 
                 # Optional: Store segment for later export or editing
@@ -6736,7 +6758,8 @@ class PointCloudViewer(ApplicationUI):
                     material_index=mat_idx,
                     material_config=self.material_configs[mat_idx],
                     color='#FF9800',
-                    alpha=0.6
+                    alpha=0.6,
+                    width_m=target_segment["width_m"]  # NEW: Use updated width
                 )
 
                 self.message_text.append(f"Segment M{mat_idx + 1}-{seg_num} updated and saved.")
@@ -6746,10 +6769,17 @@ class PointCloudViewer(ApplicationUI):
         else:
             self.message_text.append("Update cancelled.")
 
-
 # ===========================================================================================================================================================
     def interpolate_xyz(self, chainage_m):
-        """Convert chainage (m) to real-world XYZ coordinates using zero line"""
+        """
+        Kept for backward compatibility, but now prioritizes accurate alignment.
+        Falls back to linear only if alignment is not available.
+        """
+        X, Y, Z = self.get_real_coordinates_from_chainage(chainage_m)
+        if X is not None and Y is not None and Z is not None:
+            return round(X, 3), round(Y, 3), round(Z, 3)
+
+        # Fallback: linear interpolation using zero line start/end (only if alignment missing)
         if (not self.zero_line_set or
             not hasattr(self, 'zero_start_point') or
             not hasattr(self, 'zero_end_point') or
@@ -6764,11 +6794,10 @@ class PointCloudViewer(ApplicationUI):
         t = np.clip(chainage_m / total_len, 0.0, 1.0)
         point_3d = start_pt + t * (end_pt - start_pt)
         return round(float(point_3d[0]), 3), round(float(point_3d[1]), 3), round(float(point_3d[2]), 3)
-    
-# =================================================================================================================================================================
 
-    def save_material_segment_to_json(self, material_idx, config, from_m, to_m, segments_list=None):
-        """Save entire material line with all segments in ONE JSON file."""
+# =================================================================================================================================================================
+    def save_material_segment_to_json(self, material_idx, config, from_m, to_m, point_number=None, polyline_points=None, segments_list=None):
+        """Save entire material line with all segments in ONE JSON file — with correct absolute coordinates."""
         import os
         import json
         from datetime import datetime
@@ -6776,7 +6805,6 @@ class PointCloudViewer(ApplicationUI):
         mat_config = self.material_configs[material_idx]
         folder_name = mat_config.get('folder_name')
         display_name = mat_config.get('name', folder_name)
-
         if not folder_name:
             QMessageBox.critical(self, "Error", "Material folder name not found.")
             return
@@ -6784,8 +6812,14 @@ class PointCloudViewer(ApplicationUI):
         material_folder_path = os.path.join(self.current_construction_layer_path, folder_name)
         os.makedirs(material_folder_path, exist_ok=True)
 
-        from_X, from_Y, from_Z = self.interpolate_xyz(from_m)
-        to_X, to_Y, to_Z = self.interpolate_xyz(to_m)
+        # Use accurate real coordinates — NEVER null
+        from_X, from_Y, from_Z = self.get_real_coordinates_from_chainage(from_m)
+        to_X, to_Y, to_Z = self.get_real_coordinates_from_chainage(to_m)
+
+        if from_X is None or to_X is None:
+            self.message_text.append("Warning: Could not get accurate coordinates from alignment. Check horizontal/vertical profile.")
+            from_X, from_Y, from_Z = self.interpolate_xyz(from_m)  # fallback
+            to_X, to_Y, to_Z = self.interpolate_xyz(to_m)
 
         from_chainage_str = self.format_chainage(from_m, for_dialog=True)
         to_chainage_str = self.format_chainage(to_m, for_dialog=True)
@@ -6794,17 +6828,77 @@ class PointCloudViewer(ApplicationUI):
         filename = f"material_{folder_name}_{timestamp}.json"
         filepath = os.path.join(material_folder_path, filename)
 
+        # Handle legacy single segment → convert to multi-segment format
+        if segments_list is None and polyline_points is not None:
+            thickness_m = config.get('material_thickness_m', 0.0)
+            width_m = config.get('width_m', 0.0)
+            after_rolling_m = config.get('after_rolling_thickness_m', 0.0)
+
+            seg_poly_points = []
+            for p in polyline_points:
+                chainage = p["chainage_m"]
+                rel_elev = p["relative_elevation_m"]
+                abs_X, abs_Y, abs_Z = self.get_real_coordinates_from_chainage(chainage)
+                if abs_X is None:
+                    abs_X, abs_Y, abs_Z = self.interpolate_xyz(chainage)
+                seg_poly_points.append({
+                    "chainage_m": round(chainage, 3),
+                    "relative_elevation_m": round(rel_elev, 3),
+                    "absolute_coordinates": [round(abs_X, 3), round(abs_Y, 3), round(abs_Z + rel_elev, 3)]
+                })
+
+            segments_list = [{
+                "segment_number": 1 if point_number is None else point_number,
+                "segment_label": f"M{material_idx+1}-{1 if point_number is None else point_number}",
+                "from_chainage_m": round(from_m, 3),
+                "to_chainage_m": round(to_m, 3),
+                "from_chainage_str": from_chainage_str,
+                "to_chainage_str": to_chainage_str,
+                "from_coordinates": [round(from_X, 3), round(from_Y, 3), round(from_Z, 3)],
+                "to_coordinates": [round(to_X, 3), round(to_Y, 3), round(to_Z, 3)],
+                "polyline_points": seg_poly_points,
+                "material_thickness_m": thickness_m,
+                "width_m": width_m,
+                "after_rolling_thickness_m": after_rolling_m
+            }]
+
+        # Ensure every polyline point has absolute_coordinates
+        if segments_list:
+            for segment in segments_list:
+                updated_points = []
+                for p in segment.get("polyline_points", []):
+                    chainage = p["chainage_m"]
+                    rel_elev = p["relative_elevation_m"]
+                    abs_X, abs_Y, abs_Z = self.get_real_coordinates_from_chainage(chainage)
+                    if abs_X is None:
+                        abs_X, abs_Y, abs_Z = self.interpolate_xyz(chainage)
+                    abs_Z_total = abs_Z + rel_elev if abs_Z is not None else rel_elev
+                    updated_points.append({
+                        "chainage_m": round(chainage, 3),
+                        "relative_elevation_m": round(rel_elev, 3),
+                        "absolute_coordinates": [round(abs_X, 3), round(abs_Y, 3), round(abs_Z_total, 3)]
+                    })
+                segment["polyline_points"] = updated_points
+
+                # Also update segment from/to coordinates
+                fX, fY, fZ = self.get_real_coordinates_from_chainage(segment["from_chainage_m"])
+                tX, tY, tZ = self.get_real_coordinates_from_chainage(segment["to_chainage_m"])
+                if fX is None: fX, fY, fZ = self.interpolate_xyz(segment["from_chainage_m"])
+                if tX is None: tX, tY, tZ = self.interpolate_xyz(segment["to_chainage_m"])
+                segment["from_coordinates"] = [round(fX, 3), round(fY, 3), round(fZ, 3)]
+                segment["to_coordinates"] = [round(tX, 3), round(tY, 3), round(tZ, 3)]
+
         data = {
             "material_line_folder": folder_name,
             "material_line_name": display_name,
             "material_line_id": f"M{material_idx+1}",
             "overall_from_chainage": {
-                "coordinates": [from_X, from_Y, from_Z],
+                "coordinates": [round(from_X, 3), round(from_Y, 3), round(from_Z, 3)],
                 "chainage_m": round(from_m, 3),
                 "chainage_str": from_chainage_str
             },
             "overall_to_chainage": {
-                "coordinates": [to_X, to_Y, to_Z],
+                "coordinates": [round(to_X, 3), round(to_Y, 3), round(to_Z, 3)],
                 "chainage_m": round(to_m, 3),
                 "chainage_str": to_chainage_str
             },
@@ -6818,29 +6912,29 @@ class PointCloudViewer(ApplicationUI):
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
-            self.message_text.append(f"JSON saved: {filename}")
+            self.message_text.append(f"JSON saved successfully: {filename}")
         except Exception as e:
             QMessageBox.critical(self, "Save Failed", f"Error saving JSON:\n{str(e)}")
+
 
 # =====================================================================================================================================
     def get_real_coordinates_from_chainage(self, chainage_m):
         """
         Return real-world (X, Y, Z) coordinates for a given chainage in meters.
-        Customize this based on your alignment data.
+        This is the PRIMARY method used everywhere for accurate positioning.
         """
-        if not hasattr(self, 'horizontal_alignment') or not hasattr(self, 'vertical_profile'):
-            # Fallback: return None if no alignment data
+        if not hasattr(self, 'horizontal_alignment') or not self.horizontal_alignment:
+            return None, None, None
+        if not hasattr(self, 'vertical_profile') or not self.vertical_profile:
             return None, None, None
 
-        # Example: Horizontal alignment gives Easting (X), Northing (Y)
         try:
-            X, Y = self.horizontal_alignment.get_xy(chainage_m)  # Your actual method
+            X, Y = self.horizontal_alignment.get_xy(chainage_m)  # Accurate horizontal position
         except:
             X, Y = None, None
 
-        # Example: Vertical profile gives Z (elevation)
         try:
-            Z = self.vertical_profile.get_elevation(chainage_m)  # Your actual method
+            Z = self.vertical_profile.get_elevation(chainage_m)  # Accurate vertical elevation
         except:
             Z = None
 
@@ -6934,7 +7028,7 @@ class PointCloudViewer(ApplicationUI):
         self.canvas.draw_idle()
         self.message_text.append(f"Construction dot P{next_num} placed at {x:.2f}m. Click to configure.")
 
-# =======================================================================================================================================
+# =======================================================================================================================================================
 # UPDATE toggle for construction (if exists, add similar activation)
     def toggle_construction_line(self, state):  # Assuming this exists for construction checkbox
         """Toggle construction mode like material"""
@@ -6951,103 +7045,169 @@ class PointCloudViewer(ApplicationUI):
 
 
 
-# =================================================================================================================
+# =======================================================================================================================================================
     def draw_material_filling(self, from_chainage_m, to_chainage_m, thickness_m,
-                              material_index, material_config, color='#FF9800', alpha=0.6):
+                              material_index, material_config, color='#FF9800', alpha=0.6, width_m=0.0):
         """
-        100% ACCURATE FILLING: Uses the generated material line from saved drawn points (top)
-        and baseline (bottom). Fills EXACTLY between them with variable thickness from coordinates.
-        No static thickness added – no overfilling. Clean corners. Perfect alignment.
+        Creates accurate 3D closed material volume using REAL XYZ coordinates from alignment.
+        Uses local tangent direction for correct width offset on curved roads.
         """
         import numpy as np
         from matplotlib.patches import Polygon
+        import vtk
 
-        if not hasattr(self, 'ax') or self.ax is None:
-            return
+        if not hasattr(self, 'material_fill_patches'):
+            self.material_fill_patches = {}
+        if not hasattr(self, 'material_3d_actors'):
+            self.material_3d_actors = {}
 
-        # ------------------------------------------------------------------
-        # 1. Load reference baseline (bottom boundary)
-        # ------------------------------------------------------------------
+        # Cleanup old
+        if material_index in self.material_fill_patches:
+            for p in self.material_fill_patches[material_index]:
+                for patch in p.values():
+                    if patch in self.ax.patches:
+                        patch.remove()
+            self.material_fill_patches[material_index] = []
+
+        if material_index in self.material_3d_actors:
+            for actor in self.material_3d_actors[material_index]:
+                self.renderer.RemoveActor(actor)
+            self.material_3d_actors[material_index] = []
+
+        # Load baseline and material top
         ref_xs, ref_ys = self._load_baseline_from_design_layer(material_config)
         if not ref_xs or len(ref_xs) < 2:
-            self.message_text.append("Hatching failed: could not load reference baseline.")
+            self.message_text.append("Baseline not loaded — cannot draw filling.")
             return
 
-        # ------------------------------------------------------------------
-        # 2. Get the generated material line points (top boundary, from saved drawn JSON points)
-        # ------------------------------------------------------------------
-        mat_xs, mat_ys = self._get_material_line_points_for_segment(
-            material_index, from_chainage_m, to_chainage_m
-        )
+        mat_xs, mat_ys = self._get_material_line_points_for_segment(material_index, from_chainage_m, to_chainage_m)
         if len(mat_xs) < 2:
-            self.message_text.append("Hatching failed: material line too short.")
+            self.message_text.append("Not enough material points.")
             return
 
         x_dense = np.array(mat_xs)
-        mat_y_dense = np.array(mat_ys)  # Top: drawn material elevations
+        top_y_dense = np.array(mat_ys)
+        bottom_y_dense = np.interp(x_dense, ref_xs, ref_ys, left=ref_ys[0], right=ref_ys[-1])
+        top_y_dense = np.maximum(top_y_dense, bottom_y_dense)
 
-        # ------------------------------------------------------------------
-        # 3. Interpolate baseline elevation at the exact same X points (bottom)
-        # ------------------------------------------------------------------
-        bottom_y = np.interp(x_dense, ref_xs, ref_ys, left=ref_ys[0], right=ref_ys[-1])
-
-        # ------------------------------------------------------------------
-        # 4. Top boundary = drawn material y (no static thickness added)
-        #    Dynamic thickness = mat_y_dense - bottom_y (variable at each point)
-        # ------------------------------------------------------------------
-        top_y = mat_y_dense  # Exact top from drawn line
-
-        # Validation: Ensure no negative thickness (material above baseline)
-        if np.any(top_y < bottom_y):
-            self.message_text.append("Warning: Some material elevations below baseline – clipping to 0 thickness.")
-            top_y = np.maximum(top_y, bottom_y)
-
-        # ------------------------------------------------------------------
-        # 5. Create closed polygon: bottom → top → back
-        # ------------------------------------------------------------------
+        # 2D Hatching
         vertices = np.vstack([
-            np.column_stack([x_dense, bottom_y]),           # Bottom: along baseline
-            np.column_stack([x_dense[::-1], top_y[::-1]])    # Top: drawn material, reversed
+            np.column_stack([x_dense, bottom_y_dense]),
+            np.column_stack([x_dense[::-1], top_y_dense[::-1]])
         ])
-
-        # ------------------------------------------------------------------
-        # 6. Draw solid orange fill + cross-hatching
-        # ------------------------------------------------------------------
-        bg = Polygon(vertices, closed=True, facecolor=color, alpha=0.35,
-                     edgecolor='none', zorder=2)
+        bg = Polygon(vertices, closed=True, facecolor=color, alpha=0.35, edgecolor='none', zorder=2)
+        hatch = Polygon(vertices, closed=True, facecolor='none', hatch='xx', edgecolor='black', linewidth=0.8, zorder=3)
         self.ax.add_patch(bg)
-
-        hatch = Polygon(vertices, closed=True, facecolor='none', hatch='xx',
-                        edgecolor='black', linewidth=0.8, zorder=3)
         self.ax.add_patch(hatch)
-
-        # ------------------------------------------------------------------
-        # 7. Place thickness label in the center (use average computed thickness)
-        # ------------------------------------------------------------------
-        computed_thicknesses = top_y - bottom_y
-        avg_thickness_mm = np.mean(computed_thicknesses) * 1000
-        mid_x = np.mean(x_dense)
-        mid_y = np.mean(bottom_y) + np.mean(computed_thicknesses) / 2  # Midpoint vertically
-
-        # self.ax.text(mid_x, mid_y,
-        #              f"M{material_index+1}\n{avg_thickness_mm:.0f}mm (avg)",
-        #              ha='center', va='center', fontsize=10, fontweight='bold',
-        #              color='black',
-        #              bbox=dict(facecolor='white', alpha=0.95, edgecolor='none',
-        #                        boxstyle='round,pad=0.6'),
-        #              zorder=5)
-
-        # Store patches for potential cleanup later
-        if not hasattr(self, 'material_fill_patches'):
-            self.material_fill_patches = []
-        self.material_fill_patches.append({'bg': bg, 'hatch': hatch})
-
+        self.material_fill_patches.setdefault(material_index, []).append({'bg': bg, 'hatch': hatch})
         self.canvas.draw_idle()
-        self.message_text.append(
-            f"✓ ACCURATE HATCHING DRAWN for M{material_index+1} "
-            f"(variable {avg_thickness_mm:.0f} mm avg thick) – exactly between baseline and drawn material line"
-        )
 
+        avg_thick_mm = np.mean(top_y_dense - bottom_y_dense) * 1000
+        self.message_text.append(f"2D filling drawn: avg thickness {avg_thick_mm:.0f} mm")
+
+        # 3D Volume
+        if width_m <= 0.01:
+            self.message_text.append("Width = 0 → no 3D volume.")
+            return
+
+        delta = 0.5  # for tangent approximation
+        half_width = width_m / 2.0
+        left_top_pts, right_top_pts = [], []
+        left_bottom_pts, right_bottom_pts = [], []
+
+        for i in range(len(x_dense)):
+            ch = x_dense[i]
+            X, Y, base_Z = self.get_real_coordinates_from_chainage(ch)
+            if X is None:
+                X, Y, base_Z = self.interpolate_xyz(ch)
+
+            # Tangent direction using nearby points
+            X1, Y1, _ = self.get_real_coordinates_from_chainage(max(0, ch - delta))
+            X2, Y2, _ = self.get_real_coordinates_from_chainage(min(self.total_distance, ch + delta))
+            if X1 is None: X1, Y1, _ = self.interpolate_xyz(max(0, ch - delta))
+            if X2 is None: X2, Y2, _ = self.interpolate_xyz(min(self.total_distance, ch + delta))
+
+            dir_vec = np.array([X2 - X1, Y2 - Y1])
+            len_dir = np.linalg.norm(dir_vec)
+            if len_dir < 1e-6:
+                continue
+            dir_norm = dir_vec / len_dir
+
+            # CORRECTED: Proper 3D perpendicular offset
+            perp_norm_2d = np.array([-dir_norm[1], dir_norm[0]])
+            perp_offset = np.array([perp_norm_2d[0], perp_norm_2d[1], 0.0])
+            offset = perp_offset * half_width
+
+            top_z = base_Z + top_y_dense[i]
+            bottom_z = base_Z + bottom_y_dense[i]
+
+            center_top = np.array([X, Y, top_z])
+            center_bottom = np.array([X, Y, bottom_z])
+
+            left_top_pts.append(center_top + offset)
+            right_top_pts.append(center_top - offset)
+            left_bottom_pts.append(center_bottom + offset)
+            right_bottom_pts.append(center_bottom - offset)
+
+        if len(left_top_pts) < 2:
+            self.message_text.append("Not enough valid 3D points.")
+            return
+
+        # VTK Mesh
+        points = vtk.vtkPoints()
+        cells = vtk.vtkCellArray()
+
+        lt_ids = [points.InsertNextPoint(p) for p in left_top_pts]
+        rt_ids = [points.InsertNextPoint(p) for p in right_top_pts]
+        lb_ids = [points.InsertNextPoint(p) for p in left_bottom_pts]
+        rb_ids = [points.InsertNextPoint(p) for p in right_bottom_pts]
+
+        n = len(lt_ids)
+        def add_quad(a, b, c, d):
+            quad = vtk.vtkQuad()
+            quad.GetPointIds().SetId(0, a)
+            quad.GetPointIds().SetId(1, b)
+            quad.GetPointIds().SetId(2, c)
+            quad.GetPointIds().SetId(3, d)
+            cells.InsertNextCell(quad)
+
+        for i in range(n-1):
+            add_quad(lt_ids[i], lt_ids[i+1], rt_ids[i+1], rt_ids[i])        # top
+            add_quad(lb_ids[i], lb_ids[i+1], rb_ids[i+1], rb_ids[i])        # bottom
+            add_quad(lt_ids[i], lt_ids[i+1], lb_ids[i+1], lb_ids[i])        # left wall
+            add_quad(rt_ids[i], rt_ids[i+1], rb_ids[i+1], rb_ids[i])        # right wall
+
+        # End caps
+        add_quad(lt_ids[0], rt_ids[0], rb_ids[0], lb_ids[0])
+        add_quad(lt_ids[-1], lb_ids[-1], rb_ids[-1], rt_ids[-1])
+
+        polydata = vtk.vtkPolyData()
+        polydata.SetPoints(points)
+        polydata.SetPolys(cells)
+
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputData(polydata)
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        actor.GetProperty().SetColor(1.0, 0.65, 0.0)
+        actor.GetProperty().SetOpacity(0.5)
+
+        self.renderer.AddActor(actor)
+
+        # === SAFE RENDER CALL - NO MORE CRASH ===
+        if hasattr(self, 'vtkWidget') and self.vtkWidget is not None:
+            rw = self.vtkWidget.GetRenderWindow()
+            if rw:
+                rw.Render()
+        elif hasattr(self, 'renderWindowInteractor') and self.renderWindowInteractor is not None:
+            self.renderWindowInteractor.GetRenderWindow().Render()
+        elif hasattr(self, 'interactor') and self.interactor is not None:
+            self.interactor.GetRenderWindow().Render()
+        # If none exist, Render() will happen automatically on next interaction
+
+        self.material_3d_actors.setdefault(material_index, []).append(actor)
+
+        self.message_text.append(f"3D material volume created successfully (width {width_m:.1f}m)")
 # ==============================================================================================================================================
     def _load_baseline_from_design_layer(self, material_config):
         """
@@ -7155,6 +7315,187 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             self.message_text.append(f"Error reading baseline: {str(e)}")
             return None, None
+
+# NEW: Method to load and draw saved material filling, labels, and 3D
+    def load_and_draw_material_filling(self, material_index):
+        """Load saved JSON and redraw 2D filling, segment labels, and 3D plane."""
+        import json
+        import os
+
+        target_item = self.material_items[material_index]
+        folder_name = target_item.get('folder') or target_item.get('data', {}).get('folder_name')
+
+        if not folder_name:
+            self.message_text.append("Material folder name not found.")
+            return
+
+        material_folder = os.path.join(self.current_construction_layer_path, folder_name)
+        if not os.path.exists(material_folder):
+            self.message_text.append(f"Material folder not found: {material_folder}")
+            return
+
+        json_files = [f for f in os.listdir(material_folder) if f.startswith("material_") and f.endswith(".json")]
+        if not json_files:
+            self.message_text.append("No saved material JSON found.")
+            return
+
+        latest_json = sorted(json_files, key=lambda x: os.path.getmtime(os.path.join(material_folder, x)))[-1]
+        json_path = os.path.join(material_folder, latest_json)
+
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                seg_data = json.load(f)
+        except Exception as e:
+            self.message_text.append(f"Error reading JSON: {str(e)}")
+            return
+
+        from_m = seg_data["overall_from_chainage"]["chainage_m"]
+        to_m = seg_data["overall_to_chainage"]["chainage_m"]
+
+        # Assume uniform thickness/width (take from first segment)
+        thickness_m = 0.0
+        width_m = 0.0
+        if "segments" in seg_data and seg_data["segments"]:
+            thickness_m = seg_data["segments"][0].get("material_thickness_m", 0.0)
+            width_m = seg_data["segments"][0].get("width_m", 0.0)
+
+        # Draw 2D filling
+        self.draw_material_filling(
+            from_chainage_m=from_m,
+            to_chainage_m=to_m,
+            thickness_m=thickness_m,
+            material_index=material_index,
+            material_config=self.material_configs[material_index],
+            color='#FF9800',
+            alpha=0.6,
+            width_m=width_m
+        )
+
+        # Add segment labels from JSON
+        if "segments" in seg_data and seg_data["segments"]:
+            self.material_segment_labels[material_index] = []
+            for segment in seg_data["segments"]:
+                seg_num = segment["segment_number"]
+                from_seg_m = segment["from_chainage_m"]
+                to_seg_m = segment["to_chainage_m"]
+
+                mid_x = (from_seg_m + to_seg_m) / 2
+
+                # Get max y for label position
+                seg_points = segment["polyline_points"]
+                seg_ys = [p["relative_elevation_m"] for p in seg_points]
+                mid_y = max(seg_ys) + 0.25 if seg_ys else 0.25
+
+                label_text = f"M{material_index+1}-{seg_num}"
+                thickness = segment.get("material_thickness_m", 0.0)
+                if thickness > 0:
+                    label_text += f" ({thickness*1000:.0f}mm)"
+
+                annot = self.ax.annotate(
+                    label_text, (mid_x, mid_y),
+                    xytext=(0, 12), textcoords='offset points',
+                    ha='center', va='bottom',
+                    fontsize=9, fontweight='bold', color='white',
+                    bbox=dict(boxstyle='round,pad=0.4', facecolor='lightgreen' if thickness > 0 else 'orange', alpha=0.9, edgecolor='green' if thickness > 0 else 'darkorange'),
+                    picker=10
+                )
+
+                annot.point_data = {
+                    'type': 'material_segment_label',
+                    'material_index': material_index,
+                    'segment_number': seg_num,
+                    'from_chainage_m': from_seg_m,
+                    'to_chainage_m': to_seg_m,
+                    'config': {
+                        'material_thickness_m': thickness,
+                        'width_m': segment.get("width_m"),
+                        'after_rolling_thickness_m': segment.get("after_rolling_thickness_m")
+                    }
+                }
+                self.material_segment_labels[material_index].append(annot)
+
+        self.canvas.draw_idle()
+
+# NEW: Method to create 3D virtual top surface for material
+    def create_3d_material_surface(self, material_index, xs, ys, width):
+        """Create a 3D polygon surface (virtual plane) for the material top with given width, centered on the alignment."""
+        import vtk
+        import numpy as np
+
+        if not hasattr(self, 'start_point') or not hasattr(self, 'end_point') or not hasattr(self, 'total_distance'):
+            self.message_text.append("Cannot create 3D surface: zero line not set.")
+            return
+
+        start = np.array(self.start_point)
+        end = np.array(self.end_point)
+        dir_vec = (end - start) / self.total_distance
+        dir_xy_norm = dir_vec[0:2] / np.linalg.norm(dir_vec[0:2])
+        perp_xy = np.array([-dir_xy_norm[1], dir_xy_norm[0]])
+        perp = np.array([perp_xy[0], perp_xy[1], 0.0])
+
+        num_points = len(xs)
+        left_points = []
+        right_points = []
+
+        for i in range(num_points):
+            chainage = xs[i]
+            t = chainage / self.total_distance
+            center_base = start + t * (end - start)
+            abs_z = center_base[2] + ys[i]  # Absolute Z = zero line Z + relative elevation
+            center = np.array([center_base[0], center_base[1], abs_z])
+            left = center + perp * (width / 2)
+            right = center - perp * (width / 2)
+            left_points.append(left)
+            right_points.append(right)
+
+        # Create VTK points
+        vtk_points = vtk.vtkPoints()
+        point_id = 0
+        left_ids = []
+        right_ids = []
+        for pt in left_points:
+            vtk_points.InsertNextPoint(pt)
+            left_ids.append(point_id)
+            point_id += 1
+        for pt in right_points:
+            vtk_points.InsertNextPoint(pt)
+            right_ids.append(point_id)
+            point_id += 1
+
+        # Create quad strips
+        polys = vtk.vtkCellArray()
+        for i in range(num_points - 1):
+            quad = vtk.vtkQuad()
+            quad.GetPointIds().SetId(0, left_ids[i])
+            quad.GetPointIds().SetId(1, left_ids[i+1])
+            quad.GetPointIds().SetId(2, right_ids[i+1])
+            quad.GetPointIds().SetId(3, right_ids[i])
+            polys.InsertNextCell(quad)
+
+        # PolyData
+        polydata = vtk.vtkPolyData()
+        polydata.SetPoints(vtk_points)
+        polydata.SetPolys(polys)
+
+        # Mapper and Actor
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputData(polydata)
+
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        color = self.plane_colors.get('material', (1.0, 1.0, 0.0, 0.4))
+        actor.GetProperty().SetColor(color[0], color[1], color[2])
+        actor.GetProperty().SetOpacity(color[3])
+
+        # Add to renderer
+        self.renderer.AddActor(actor)
+        self.vtkWidget.GetRenderWindow().Render()
+
+        # Store for cleanup
+        if material_index not in self.material_3d_actors:
+            self.material_3d_actors[material_index] = []
+        self.material_3d_actors[material_index].append(actor)
+
 # ========================================================================================================================================
 #                                                   *** END OF APPLICAATION ***
 # ========================================================================================================================================      
