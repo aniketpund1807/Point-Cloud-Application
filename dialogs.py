@@ -736,26 +736,20 @@ class MaterialLineDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Create New Material Line")
         self.setModal(True)
-        self.setFixedSize(500, 650)
+        self.setFixedSize(500, 500)
 
-        # Store the path to the current construction layer folder
         self.construction_layer_path = construction_layer_path
         self.parent_app = parent
         self.material_data = material_data if material_data else {
             'name': '',
             'description': '',
             'material_type': '',
-            'from_another': False,
-            'material_layer': True,
-            'ref_layer': '',
-            'ref_line': '',
-            'initial_filling': 0.0,
-            'final_compressed': 0.0
+            'ref_layer': 'None'  # Selected baseline name
         }
+
         self.setup_ui()
         self.load_material_data()
-        self.update_ui_visibility()
-        self.load_available_baselines()  # ← This now loads ONLY selected baselines
+        self.load_available_baselines()
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -783,88 +777,26 @@ class MaterialLineDialog(QDialog):
         type_label = QLabel("Material Type:")
         type_label.setFixedWidth(150)
         self.type_input = QLineEdit()
-        self.type_input.setPlaceholderText("Enter material type")
+        self.type_input.setPlaceholderText("Enter material type (e.g., GSB, WMM)")
         type_layout.addWidget(type_label)
         type_layout.addWidget(self.type_input, 1)
         layout.addLayout(type_layout)
 
-        layout.addSpacing(10)
+        layout.addSpacing(20)
 
-        # Reference section
-        ref_label = QLabel("Material lines reference layers")
-        ref_label.setStyleSheet("font-weight: bold;")
+        # Reference Baseline Section
+        ref_label = QLabel("Reference Baseline")
+        ref_label.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(ref_label)
 
-        # Radio buttons
-        self.from_another_radio = QRadioButton("Material Line referring from Baselines")
-        self.material_layer_radio = QRadioButton("Material Line referring from Material layer")
-        self.material_layer_radio.setChecked(True)
-        self.from_another_radio.toggled.connect(self.update_ui_visibility)
-        self.material_layer_radio.toggled.connect(self.update_ui_visibility)
-
-        radio_layout = QVBoxLayout()
-        radio_layout.addWidget(self.from_another_radio)
-        radio_layout.addWidget(self.material_layer_radio)
-        layout.addLayout(radio_layout)
-
-        layout.addSpacing(15)
-
-        # Reference Baseline (only visible when "from Baselines" is selected)
-        self.ref_layer_layout = QHBoxLayout()
+        ref_layer_layout = QHBoxLayout()
         ref_layer_label = QLabel("Select Reference Baseline:")
         ref_layer_label.setFixedWidth(150)
         self.ref_layer_combo = QComboBox()
         self.ref_layer_combo.addItem("None")
-        self.ref_layer_layout.addWidget(ref_layer_label)
-        self.ref_layer_layout.addWidget(self.ref_layer_combo, 1)
-        self.ref_layer_widget = QWidget()
-        self.ref_layer_widget.setLayout(self.ref_layer_layout)
-        self.ref_layer_widget.setVisible(False)
-        layout.addWidget(self.ref_layer_widget)
-
-        # Reference Material Line
-        self.ref_line_layout = QHBoxLayout()
-        ref_line_label = QLabel("Select Reference Material line:")
-        ref_line_label.setFixedWidth(150)
-        self.ref_line_combo = QComboBox()
-        self.ref_line_combo.addItems(["None"])  # Will be populated dynamically if needed
-        self.ref_line_layout.addWidget(ref_line_label)
-        self.ref_line_layout.addWidget(self.ref_line_combo, 1)
-        self.ref_line_widget = QWidget()
-        self.ref_line_widget.setLayout(self.ref_line_layout)
-        self.ref_line_widget.setVisible(True)
-        layout.addWidget(self.ref_line_widget)
-
-        layout.addSpacing(15)
-
-        # Thickness section
-        thickness_label = QLabel("Define thickness")
-        thickness_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(thickness_label)
-
-        initial_layout = QHBoxLayout()
-        initial_label = QLabel("Initial Filling thickness (m):")
-        initial_label.setFixedWidth(200)
-        self.initial_spin = QDoubleSpinBox()
-        self.initial_spin.setRange(0.0, 10000.0)
-        self.initial_spin.setValue(0.0)
-        self.initial_spin.setSingleStep(0.1)
-        self.initial_spin.setSuffix(" m")
-        initial_layout.addWidget(initial_label)
-        initial_layout.addWidget(self.initial_spin, 1)
-        layout.addLayout(initial_layout)
-
-        final_layout = QHBoxLayout()
-        final_label = QLabel("Final Compressed thickness (m):")
-        final_label.setFixedWidth(200)
-        self.final_spin = QDoubleSpinBox()
-        self.final_spin.setRange(0.0, 10000.0)
-        self.final_spin.setValue(0.0)
-        self.final_spin.setSingleStep(0.1)
-        self.final_spin.setSuffix(" m")
-        final_layout.addWidget(final_label)
-        final_layout.addWidget(self.final_spin, 1)
-        layout.addLayout(final_layout)
+        ref_layer_layout.addWidget(ref_layer_label)
+        ref_layer_layout.addWidget(self.ref_layer_combo, 1)
+        layout.addLayout(ref_layer_layout)
 
         layout.addStretch()
 
@@ -893,47 +825,17 @@ class MaterialLineDialog(QDialog):
             QMessageBox.warning(self, "Invalid Name", "Please enter a valid material line name.")
             return
 
-        material_folder = os.path.join(self.construction_layer_path, material_name)
-        if os.path.exists(material_folder):
-            QMessageBox.warning(self, "Folder Exists", f"A material line folder named '{material_name}' already exists.")
+        selected_baseline = self.ref_layer_combo.currentText()
+        if selected_baseline == "None":
+            QMessageBox.warning(self, "No Baseline", "Please select a reference baseline.")
             return
 
-        try:
-            os.makedirs(material_folder)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to create folder: {str(e)}")
-            return
-
-        config_data = {
-            "worksheet_name": getattr(self.parent_app, 'current_worksheet_name', "Unknown"),
-            "project_name": getattr(self.parent_app, 'current_project_name', "Unknown"),
-            "created_by": getattr(self.parent_app, 'current_user', "guest"),
-            "created_at": datetime.now().isoformat(),
-            "material_line": {
-                "name": material_name,
-                "material_type": self.type_input.text().strip(),
-                "from_another": self.from_another_radio.isChecked(),
-                "ref_layer": self.ref_layer_combo.currentText() if self.from_another_radio.isChecked() else "",
-                "ref_line": self.ref_line_combo.currentText() if self.material_layer_radio.isChecked() else "",
-                "initial_filling_m": self.initial_spin.value(),
-                "final_compressed_m": self.final_spin.value()
-            }
-        }
-
-        config_path = os.path.join(material_folder, "material_line_config.txt")
-        try:
-            with open(config_path, 'w', encoding='utf-8') as f:
-                json.dump(config_data, f, indent=4, ensure_ascii=False)
-            QMessageBox.information(self, "Success", f"Material line '{material_name}' saved successfully!")
-            self.accept()
-        except Exception as e:
-            QMessageBox.critical(self, "Save Failed", f"Failed to save config: {str(e)}")
+        # No folder creation, no file writing — just accept the dialog
+        QMessageBox.information(self, "Success", f"Material line '{material_name}' configured successfully!")
+        self.accept()  # This will make dialog.exec_() return QDialog.Accepted
 
     def load_available_baselines(self):
-        """
-        Load ONLY the selected baselines from the construction layer config.
-        Fixed to use absolute paths reliably on Windows with spaces.
-        """
+        """Load only the selected baselines from Construction_Layer_config.txt"""
         self.ref_layer_combo.clear()
         self.ref_layer_combo.addItem("None")
 
@@ -961,32 +863,18 @@ class MaterialLineDialog(QDialog):
                 self.ref_layer_combo.addItem("No reference design layer defined")
                 return
 
-            # === FINAL ROBUST PATH CONSTRUCTION ===
-            # Start from construction layer folder and go up to worksheet root
-            worksheet_root = os.path.abspath(
-                os.path.join(self.construction_layer_path, "..", "..")
-            )
-            # worksheet_root = E:\3D_Tool\user\worksheets\Road Design - Charholi
-
+            worksheet_root = os.path.abspath(os.path.join(self.construction_layer_path, "..", ".."))
             designs_folder = os.path.join(worksheet_root, "designs")
             design_layer_path = os.path.join(designs_folder, reference_layer_2d)
 
-            # Debug: You can temporarily uncomment these to see paths in console
-            # print("Worksheet root:", worksheet_root)
-            # print("Designs folder:", designs_folder)
-            # print("Target layer path:", design_layer_path)
-
             if not os.path.exists(design_layer_path):
                 self.ref_layer_combo.addItem(f"Design layer folder not found: {reference_layer_2d}")
-                self.ref_layer_combo.addItem(f"Checked path: {design_layer_path}")
                 return
-            # === END FIX ===
 
             found_count = 0
             for baseline_filename in selected_baselines:
                 file_path = os.path.join(design_layer_path, baseline_filename)
                 if os.path.exists(file_path):
-                    # Clean display name (remove "_baseline.json")
                     display_name = os.path.basename(baseline_filename).replace("_baseline.json", "")
                     self.ref_layer_combo.addItem(display_name)
                     found_count += 1
@@ -995,59 +883,26 @@ class MaterialLineDialog(QDialog):
 
             if found_count == 0:
                 self.ref_layer_combo.addItem("Selected baselines not found in design layer")
-            elif found_count > 0:
-                # Optional success indicator
-                pass
 
         except Exception as e:
             self.ref_layer_combo.addItem(f"Error loading config: {str(e)}")
-
-    def update_ui_visibility(self):
-        if self.from_another_radio.isChecked():
-            self.ref_layer_widget.setVisible(True)
-            self.ref_line_widget.setVisible(False)
-        else:
-            self.ref_layer_widget.setVisible(False)
-            self.ref_line_widget.setVisible(True)
 
     def load_material_data(self):
         if not self.material_data:
             return
         self.name_input.setText(self.material_data.get('name', ''))
         self.type_input.setText(self.material_data.get('material_type', ''))
-        from_another = self.material_data.get('from_another', False)
-        if from_another:
-            self.from_another_radio.setChecked(True)
-        else:
-            self.material_layer_radio.setChecked(True)
-
         ref_layer = self.material_data.get('ref_layer', 'None')
         index = self.ref_layer_combo.findText(ref_layer)
         if index >= 0:
             self.ref_layer_combo.setCurrentIndex(index)
 
-        ref_line = self.material_data.get('ref_line', 'None')
-        index = self.ref_line_combo.findText(ref_line)
-        if index >= 0:
-            self.ref_line_combo.setCurrentIndex(index)
-
-        self.initial_spin.setValue(self.material_data.get('initial_filling', 0.0))
-        self.final_spin.setValue(self.material_data.get('final_compressed', 0.0))
-
     def get_material_data(self):
         return {
             'name': self.name_input.text().strip(),
             'material_type': self.type_input.text().strip(),
-            'from_another': self.from_another_radio.isChecked(),
-            'material_layer': self.material_layer_radio.isChecked(),
-            'ref_layer': self.ref_layer_combo.currentText() if self.from_another_radio.isChecked() else '',
-            'ref_line': self.ref_line_combo.currentText() if self.material_layer_radio.isChecked() else '',
-            'initial_filling': self.initial_spin.value(),
-            'final_compressed': self.final_spin.value(),
+            'ref_layer': self.ref_layer_combo.currentText() if self.ref_layer_combo.currentText() != "None" else ''
         }
-    
-
-
 # ==========================================================================================================================================
 #                                                    ** MEASUREMENT DIALOG **
 # ==========================================================================================================================================
@@ -3177,6 +3032,258 @@ class MaterialSegmentDialog(QDialog):
             QMessageBox.warning(self, "Input Error",
                                 f"Invalid chainage format. Use KM+Interval like 101+000 or just meters.\nError: {str(e)}")
             return None
+        
 
+# ======================================================================================================================================================================
+#                                                                ** NEW MATERIAL LINE DIALOG CLASS **
+# ======================================================================================================================================================================
+class NewMaterialLineDialog(QDialog):
+    """Dialog for adding/editing material segments - matches your hand-drawn sketch exactly."""
+    def __init__(self, material_name="M2", segments=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Material Segments")
+        self.setModal(True)
+        self.setMinimumWidth(700)
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #f0e6fa, stop:1 #e6e6fa);
+                border-radius: 20px;
+            }
+            QLabel {
+                color: black;
+                font-weight: 500;
+                font-size: 14px;
+            }
+            QGroupBox {
+                border: 2px solid #7B1FA2;
+                border-radius: 10px;
+                margin-top: 15px;
+                padding-top: 10px;
+                font-weight: bold;
+                color: #4A148C;
+                background-color: rgba(255,255,255,0.3);
+            }
+            QLineEdit {
+                border: 2px solid #9C27B0;
+                border-radius: 8px;
+                padding: 8px;
+                background-color: white;
+            }
+            QLineEdit:focus {
+                border: 2px solid #7B1FA2;
+                background-color: #F3E5F5;
+            }
+            QPushButton {
+                border-radius: 20px;
+                padding: 10px;
+                font-weight: bold;
+                min-width: 120px;
+                border: none;
+            }
+            QPushButton#saveBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #9C27B0, stop:1 #6A1B9A);
+                color: white;
+            }
+            QPushButton#saveBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #AB47BC, stop:1 #4A148C);
+            }
+            QPushButton#cancelBtn {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #E1BEE7, stop:1 #CE93D8);
+                color: #333333;
+            }
+            QPushButton#cancelBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #D1C4E9, stop:1 #BA68C8);
+            }
+        """)
 
+        self.segments = segments or []  # List to store segment data
 
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(20)
+
+        # Material Details Group
+        material_group = QGroupBox("Material Details")
+        material_layout = QHBoxLayout()
+        material_layout.setSpacing(15)
+
+        name_label = QLabel("Name:")
+        self.name_edit = QLineEdit(material_name)
+        self.name_edit.setPlaceholderText("e.g. M2")
+        material_layout.addWidget(name_label)
+        material_layout.addWidget(self.name_edit)
+
+        type_label = QLabel("Material Type:")
+        self.type_edit = QLineEdit()
+        self.type_edit.setPlaceholderText("e.g. Asphalt")
+        material_layout.addWidget(type_label)
+        material_layout.addWidget(self.type_edit)
+
+        ref_label = QLabel("Reference Layer:")
+        self.ref_edit = QLineEdit()
+        self.ref_edit.setPlaceholderText("e.g. Road Surface")
+        material_layout.addWidget(ref_label)
+        material_layout.addWidget(self.ref_edit)
+
+        material_group.setLayout(material_layout)
+        layout.addWidget(material_group)
+
+        # Table-like layout for segments
+        table_widget = QWidget()
+        table_layout = QVBoxLayout(table_widget)
+        table_layout.setSpacing(15)
+
+        # Header
+        header = QHBoxLayout()
+        header.addStretch(1)
+        header.addWidget(QLabel("From"), alignment=Qt.AlignCenter)
+        header.addWidget(QLabel("→"), alignment=Qt.AlignCenter)
+        header.addWidget(QLabel("To"), alignment=Qt.AlignCenter)
+        header.addWidget(QLabel("Width"), alignment=Qt.AlignCenter)
+        header.addWidget(QLabel("Initial Thickness"), alignment=Qt.AlignCenter)
+        header.addWidget(QLabel("After Rolling"), alignment=Qt.AlignCenter)
+        header.addStretch(1)
+        table_layout.addLayout(header)
+
+        # Segment rows (initially 3 as in your sketch)
+        self.segment_rows = []
+        for i in range(3):
+            row = self.create_segment_row(i)
+            table_layout.addLayout(row['layout'])
+            self.segment_rows.append(row)
+
+        # Add more rows button if needed
+        add_more_btn = QPushButton("+ Add Segment")
+        add_more_btn.clicked.connect(self.add_segment_row)
+        table_layout.addWidget(add_more_btn, alignment=Qt.AlignCenter)
+
+        layout.addWidget(table_widget)
+
+        # Buttons at bottom
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("cancelBtn")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        save_btn = QPushButton("Save")
+        save_btn.setObjectName("saveBtn")
+        save_btn.clicked.connect(self.on_save)
+        btn_layout.addWidget(save_btn)
+
+        layout.addLayout(btn_layout)
+
+    def create_segment_row(self, index):
+        """Create one row for a material segment"""
+        row_layout = QHBoxLayout()
+        row_layout.setSpacing(10)
+
+        # Checkbox (empty square)
+        checkbox = QCheckBox()
+        checkbox.setChecked(False)
+        row_layout.addWidget(checkbox)
+
+        # From chainage
+        from_edit = QLineEdit()
+        from_edit.setPlaceholderText("e.g. 101 + 20")
+        from_edit.setFixedWidth(120)
+        row_layout.addWidget(from_edit)
+
+        # Arrow
+        row_layout.addWidget(QLabel("→"), alignment=Qt.AlignCenter)
+
+        # To chainage
+        to_edit = QLineEdit()
+        to_edit.setPlaceholderText("e.g. 101 + 60")
+        to_edit.setFixedWidth(180)
+        row_layout.addWidget(to_edit)
+
+        # Width
+        width_edit = QLineEdit()
+        width_edit.setPlaceholderText("e.g. 15")
+        width_edit.setFixedWidth(80)
+        row_layout.addWidget(width_edit, alignment=Qt.AlignCenter)
+
+        # Initial Thickness
+        initial_edit = QLineEdit()
+        initial_edit.setPlaceholderText("e.g. 50 mm")
+        initial_edit.setFixedWidth(120)
+        row_layout.addWidget(initial_edit, alignment=Qt.AlignCenter)
+
+        # After Rolling
+        after_edit = QLineEdit()
+        after_edit.setPlaceholderText("e.g. 40 mm")
+        after_edit.setFixedWidth(120)
+        row_layout.addWidget(after_edit, alignment=Qt.AlignCenter)
+
+        row_layout.addStretch()
+
+        return {
+            'layout': row_layout,
+            'checkbox': checkbox,
+            'from': from_edit,
+            'to': to_edit,
+            'width': width_edit,
+            'initial': initial_edit,
+            'after': after_edit
+        }
+
+    def add_segment_row(self):
+        """Add a new empty segment row"""
+        new_row = self.create_segment_row(len(self.segment_rows))
+        self.segment_rows[-1]['layout'].parent().layout().insertLayout(len(self.segment_rows) - 1, new_row['layout'])
+        self.segment_rows.append(new_row)
+
+    def on_save(self):
+        """Validate and collect data before accepting"""
+        name = self.name_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Missing Data", "Please enter Material Name.")
+            return
+
+        material_type = self.type_edit.text().strip()
+        ref_layer = self.ref_edit.text().strip()
+
+        collected = []
+        for row in self.segment_rows:
+            if row['checkbox'].isChecked():
+                from_ch = row['from'].text().strip()
+                to_ch = row['to'].text().strip()
+                width = row['width'].text().strip()
+                initial = row['initial'].text().strip()
+                after = row['after'].text().strip()
+
+                if not from_ch or not to_ch:
+                    QMessageBox.warning(self, "Missing Data", "Please fill From and To chainage for checked segments.")
+                    return
+
+                collected.append({
+                    'from_chainage': from_ch,
+                    'to_chainage': to_ch,
+                    'width': width or None,
+                    'initial_thickness': initial or None,
+                    'after_rolling': after or None
+                })
+
+        if not collected:
+            QMessageBox.warning(self, "No Data", "Please check at least one segment and fill required fields.")
+            return
+
+        self.material_data = {
+            'name': name,
+            'material_type': material_type,
+            'ref_layer': ref_layer,
+            'segments': collected
+        }
+        self.accept()
+
+    def get_material_data(self):
+        """Return dictionary with material info and segments"""
+        return getattr(self, 'material_data', None)
