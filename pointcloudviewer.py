@@ -1065,7 +1065,8 @@ class PointCloudViewer(ApplicationUI):
 
 # =======================================================================================================================================
     def open_material_line_dialog(self):
-        """Opens the appropriate dialog based on whether material_lines_config.txt exists"""
+        """Opens the appropriate dialog based on whether material_lines_config.txt exists.
+           Now also creates and maintains material_lines_config.txt with full structure."""
         if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
             QMessageBox.warning(self, "No Worksheet", "Please create or open a worksheet first.")
             return
@@ -1085,8 +1086,25 @@ class PointCloudViewer(ApplicationUI):
 
         material_lines_config_path = os.path.join(current_construction_path, "material_lines_config.txt")
 
-        if not os.path.exists(material_lines_config_path):
-            # === First material line – use old dialog ===
+        # Initialize or load config structure
+        config_data = {
+            "worksheet_name": self.current_worksheet_name or "Unknown Worksheet",
+            "project_name": getattr(self, 'project_name', 'Project_1'),
+            "created_by": getattr(self, 'current_user', 'admin123'),
+            "created_at": "2026-01-05T14:53:39.382065",  # Current timestamp as per date
+            "material_line": []
+        }
+
+        if os.path.exists(material_lines_config_path):
+            try:
+                with open(material_lines_config_path, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                config_data.update(loaded)
+            except Exception as e:
+                self.message_text.append(f"Error loading material_lines_config.txt: {str(e)}")
+
+        if not os.path.exists(material_lines_config_path) or not config_data.get("material_line"):
+            # === First material line – use old MaterialLineDialog ===
             dialog = MaterialLineDialog(
                 construction_layer_path=current_construction_path,
                 parent=self
@@ -1129,54 +1147,53 @@ class PointCloudViewer(ApplicationUI):
                 self.message_text.append(f"Reference Baseline: {config['ref_layer']}")
                 self.message_text.append("")
 
-        else:
-            # === material_lines_config.txt exists – use new dialog ===
-            try:
-                with open(material_lines_config_path, 'r', encoding='utf-8') as f:
-                    material_lines_config_data = json.load(f)
+                # === Create and save material_lines_config.txt for the first time ===
+                new_config_entry = {
+                    "name": material_data['name'],
+                    "material_type": material_data['material_type'],
+                    "ref_layer": material_data['ref_layer']
+                }
+                config_data["material_line"].append(new_config_entry)
 
-                material_lines = material_lines_config_data.get("material_line", [])
+                try:
+                    with open(material_lines_config_path, 'w', encoding='utf-8') as f:
+                        json.dump(config_data, f, indent=4, ensure_ascii=False)
+                    self.message_text.append("Created material_lines_config.txt")
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to create material_lines_config.txt:\n{e}")
+
+        else:
+            # === material_lines_config.txt exists – use NewMaterialLineDialog ===
+            try:
+                # We already loaded config_data above, so reuse it
+                material_lines = config_data.get("material_line", [])
 
                 if not material_lines:
                     QMessageBox.information(self, "No Materials", "No material lines defined yet in material_lines_config.txt.")
                     return
 
-                # Take the last (latest) material
+                # Prepare default values (not strictly needed anymore since NewMaterialLineDialog doesn't use them directly)
                 latest_material = material_lines[-1]
-                material_name = latest_material.get("name", f"M{len(self.material_configs)+1}")
-                ref_layer = latest_material.get("ref_layer", "")
+                default_name = f"Material Line - {len(material_lines) + 1}"
 
-                # Show "Construction" if ref_layer is "construction"
-                display_ref_name = "Construction" if str(ref_layer).lower() == "construction" else ref_layer
-
-                folder_name = material_name.strip()
-
-                # This dict is passed to NewMaterialLineDialog
+                # Pass minimal config – NewMaterialLineDialog now loads table data independently
                 material_config_for_dialog = {
-                    'name': material_name,
-                    'folder_name': folder_name,
-                    'material_type': latest_material.get("material_type", ""),
-                    'ref_layer': ref_layer,
-                    'visible': True,
-                    'path': os.path.join(current_construction_path, folder_name),
-                    '_display_ref_name': display_ref_name
+                    'name': default_name,
+                    'material_type': "",
+                    'ref_layer': "construction",
+                    '_display_ref_name': "Construction"
                 }
 
             except Exception as e:
-                self.message_text.append(f"Error loading material_lines_config.txt: {str(e)}")
-                # Safe fallback
-                default_name = f"M{len(self.material_configs)+1}"
+                self.message_text.append(f"Error preparing dialog: {str(e)}")
                 material_config_for_dialog = {
-                    'name': default_name,
-                    'folder_name': default_name,
+                    'name': f"Material Line - {len(self.material_configs)+1}",
                     'material_type': "",
-                    'ref_layer': "",
-                    'visible': True,
-                    'path': "",
-                    '_display_ref_name': "Unknown"
+                    'ref_layer': "construction",
+                    '_display_ref_name': "Construction"
                 }
 
-            # CORRECT CALL – uses material_config, never material_name
+            # Use NewMaterialLineDialog
             dialog = NewMaterialLineDialog(material_config=material_config_for_dialog, parent=self)
 
             if dialog.exec_() == QDialog.Accepted:
@@ -1199,7 +1216,7 @@ class PointCloudViewer(ApplicationUI):
                 self.material_configs.append(config)
                 self.create_material_line_entry(config)
 
-                if len(self.material_configs) == 1:
+                if len(self.material_configs) == 1:  # In case first was skipped somehow
                     self.add_material_line_button.setStyleSheet("""
                         QPushButton {
                             background-color: #FFA500;
@@ -1219,7 +1236,21 @@ class PointCloudViewer(ApplicationUI):
                 self.message_text.append(f"Reference Baseline: {config['ref_layer']}")
                 self.message_text.append("")
 
-                # Your original segment processing code – unchanged
+                # === Append new entry to material_lines_config.txt ===
+                new_config_entry = {
+                    "name": material_data['name'],
+                    "material_type": material_data['material_type'],
+                    "ref_layer": material_data['ref_layer']
+                }
+                config_data["material_line"].append(new_config_entry)
+
+                try:
+                    with open(material_lines_config_path, 'w', encoding='utf-8') as f:
+                        json.dump(config_data, f, indent=4, ensure_ascii=False)
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to update material_lines_config.txt:\n{e}")
+
+                # === Your original segment processing code – FULLY PRESERVED ===
                 def parse_chainage(ch_str):
                     ch_str = ch_str.strip()
                     if '+' in ch_str:
@@ -1344,7 +1375,6 @@ class PointCloudViewer(ApplicationUI):
 
             else:
                 self.message_text.append("Material Line creation cancelled.")
-
 # =======================================================================================================================================    
 # Optional: allow editing later with pencil button
     def edit_material_line(self):

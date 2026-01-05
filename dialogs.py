@@ -3038,70 +3038,47 @@ class MaterialSegmentDialog(QDialog):
 #                                                                ** NEW MATERIAL LINE DIALOG CLASS **
 # ======================================================================================================================================================================
 class NewMaterialLineDialog(QDialog):
-    """Dialog exactly matching your final requirement and screenshot.
-       - Shows Construction baseline (overall start-end)
-       - Shows each material line as ONE row (using overall_from/to_chainage_str)
-       - Material Name from material_line_name
-       - Only Width, Initial & After Rolling editable
+    """Dialog for creating new material lines after the first one.
+       Shows baseline + previous materials as rows.
+       User checks which ones to reference, edits width/thickness per row.
+       On Save → returns full material data including selected ref_layer(s)
     """
     def __init__(self, material_config=None, parent=None):
         super().__init__(parent)
         self.parent = parent
-        self.material_config = material_config
+        self.material_config = material_config or {}
         self.table_data = []  # List of dicts: one per baseline/material
 
         self.setWindowTitle("Material Segments")
         self.setModal(True)
-        self.setMinimumWidth(1000)
+        self.setMinimumWidth(1100)
         self.setStyleSheet("""
             QDialog {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                             stop:0 #f0e6fa, stop:1 #e6e6fa);
                 border-radius: 20px;
             }
-            QLabel {
-                color: black;
-                font-weight: 500;
-                font-size: 14px;
-            }
+            QLabel { color: black; font-weight: 500; font-size: 14px; }
             QLineEdit {
-                border: 2px solid #9C27B0;
-                border-radius: 8px;
-                padding: 8px;
+                border: 2px solid #9C27B0; border-radius: 8px; padding: 8px;
                 background-color: white;
             }
-            QLineEdit:focus {
-                border: 2px solid #7B1FA2;
-                background-color: #F3E5F5;
-            }
-            QLineEdit[readOnly="true"] {
-                background-color: #f0f0f0;
-                color: #555555;
-            }
-            QPushButton {
-                border-radius: 20px;
-                padding: 10px;
-                font-weight: bold;
-                min-width: 120px;
-                border: none;
-            }
+            QLineEdit:focus { border: 2px solid #7B1FA2; background-color: #F3E5F5; }
+            QLineEdit[readOnly="true"] { background-color: #f0f0f0; color: #555555; }
+            QPushButton { border-radius: 20px; padding: 10px; font-weight: bold; min-width: 120px; border: none; }
             QPushButton#saveBtn {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                        stop:0 #9C27B0, stop:1 #6A1B9A);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #9C27B0, stop:1 #6A1B9A);
                 color: white;
             }
             QPushButton#saveBtn:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                        stop:0 #AB47BC, stop:1 #4A148C);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #AB47BC, stop:1 #4A148C);
             }
             QPushButton#cancelBtn {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                        stop:0 #E1BEE7, stop:1 #CE93D8);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #E1BEE7, stop:1 #CE93D8);
                 color: #333333;
             }
             QPushButton#cancelBtn:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                        stop:0 #D1C4E9, stop:1 #BA68C8);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #D1C4E9, stop:1 #BA68C8);
             }
         """)
 
@@ -3111,23 +3088,33 @@ class NewMaterialLineDialog(QDialog):
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(20)
 
-
         # Title
-        title_label = QLabel("Material Line Configuration")
+        title_label = QLabel("New Material Line Configuration")
         title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #000000; padding-bottom: 15px;")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
-
 
         # Material Line Name
         name_layout = QHBoxLayout()
         name_label = QLabel("Material line name:")
         name_label.setFixedWidth(150)
         self.name_input = QLineEdit()
+        default_name = f"Material Line - {len(self.parent.material_configs) + 1}"
+        self.name_input.setText(default_name)
         self.name_input.setPlaceholderText("Enter material line name")
         name_layout.addWidget(name_label)
         name_layout.addWidget(self.name_input, 1)
         layout.addLayout(name_layout)
+
+        # Material Type
+        type_layout = QHBoxLayout()
+        type_label = QLabel("Material Type:")
+        type_label.setFixedWidth(150)
+        self.type_input = QLineEdit()
+        self.type_input.setPlaceholderText("Enter material type (e.g., GSB, WMM, Soil, Stone)")
+        type_layout.addWidget(type_label)
+        type_layout.addWidget(self.type_input, 1)
+        layout.addLayout(type_layout)
 
         # Table
         table_widget = QWidget()
@@ -3136,44 +3123,20 @@ class NewMaterialLineDialog(QDialog):
 
         # Header
         header = QHBoxLayout()
+        # header.addWidget(QLabel("Use as Ref"), 0, Qt.AlignLeft)
 
-        # Add checkbox placeholder (no width adjustment)
-        header.addWidget(QLabel(""), 0, Qt.AlignLeft)  # Checkbox space
-
-        # Add all header labels
-        headers = [
-            "From",
-            "→", 
-            "To",
-            "Material/ ref Name",
-            "Width",
-            "Initial Thickness",
-            "After Rolling"
-        ]
-
-        # Add each label with specific spacing
+        headers = ["From", "→", "To", "Reference Name", "Width (m)", "Initial Thickness", "After Rolling"]
         for i, text in enumerate(headers):
             label = QLabel(text)
             label.setAlignment(Qt.AlignCenter)
             header.addWidget(label)
-            
-            # Add different spacing after each label
-            if i == 0:  # After "From"
-                header.addSpacing(5)  # Adjust this value
-            elif i == 1:  # After arrow
-                header.addSpacing(10)  # Adjust this value
-            elif i == 2:  # After "To"
-                header.addSpacing(5)  # Adjust this value
-            elif i == 3:  # After "Material/ ref Name"
-                header.addSpacing(15)  # Adjust this value
-            elif i == 4:  # After "Width"
-                header.addSpacing(20)  # Adjust this value
-            elif i == 5:  # After "Initial Thickness"
-                header.addSpacing(15)  # Adjust this value
-            elif i == 6:  # After "Initial Thickness"
-                header.addSpacing(80)  # Adjust this value
-            # No spacing after the last one
-
+            if i == 0: header.addSpacing(5)
+            elif i == 1: header.addSpacing(15)
+            elif i == 2: header.addSpacing(5)
+            elif i == 3: header.addSpacing(80)
+            elif i == 4: header.addSpacing(20)
+            elif i == 5: header.addSpacing(15)
+            elif i == 6: header.addSpacing(80)
 
         table_layout.addLayout(header)
 
@@ -3185,7 +3148,6 @@ class NewMaterialLineDialog(QDialog):
                 table_layout.addLayout(row['layout'])
                 self.segment_rows.append(row)
         else:
-            # Empty fallback
             for i in range(3):
                 row = self.create_row(i, None)
                 table_layout.addLayout(row['layout'])
@@ -3196,7 +3158,6 @@ class NewMaterialLineDialog(QDialog):
         # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName("cancelBtn")
         cancel_btn.clicked.connect(self.reject)
@@ -3206,11 +3167,10 @@ class NewMaterialLineDialog(QDialog):
         save_btn.setObjectName("saveBtn")
         save_btn.clicked.connect(self.on_save)
         btn_layout.addWidget(save_btn)
-
         layout.addLayout(btn_layout)
 
     def load_table_data(self):
-        """Load Construction baseline + all material JSONs using overall chainage only."""
+        """Load Construction baseline + all existing material JSONs"""
         self.table_data = []
 
         if not self.parent or not hasattr(self.parent, 'current_construction_layer_path'):
@@ -3220,9 +3180,8 @@ class NewMaterialLineDialog(QDialog):
         worksheet_root = os.path.abspath(os.path.join(construction_path, "..", ".."))
         designs_path = os.path.join(worksheet_root, "designs")
 
-        # === 1. Load Construction baseline if ref_layer is construction ===
+        # 1. Construction baseline
         if self.material_config and str(self.material_config.get('ref_layer', '')).lower() == 'construction':
-            # Find referenced design layer
             const_config_path = os.path.join(construction_path, "Construction_Layer_config.txt")
             ref_design_layer = ""
             if os.path.exists(const_config_path):
@@ -3230,8 +3189,7 @@ class NewMaterialLineDialog(QDialog):
                     with open(const_config_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                     ref_design_layer = data.get("reference_layer_2d", "")
-                except:
-                    pass
+                except: pass
 
             baseline_path = None
             if ref_design_layer:
@@ -3254,7 +3212,7 @@ class NewMaterialLineDialog(QDialog):
                         self.table_data.append({
                             'from': first.get("chainage_m", 0.000),
                             'to': last.get("chainage_m", 0.000),
-                            'name': "construction",
+                            'name': "Construction",
                             'width': "",
                             'initial': 0,
                             'final': 0
@@ -3262,7 +3220,7 @@ class NewMaterialLineDialog(QDialog):
                 except Exception as e:
                     print(f"Error loading construction baseline: {e}")
 
-        # === 2. Load all material JSON files (one row per file) ===
+        # 2. All existing material JSON files
         for filename in os.listdir(construction_path):
             if filename.lower().endswith(".json") and "material" in filename.lower():
                 json_path = os.path.join(construction_path, filename)
@@ -3278,11 +3236,8 @@ class NewMaterialLineDialog(QDialog):
                     from_str = from_info.get("chainage_str", f"{from_info.get('chainage_m', 0):.3f}")
                     to_str = to_info.get("chainage_str", f"{to_info.get('chainage_m', 0):.3f}")
 
-                    # Get average or first segment values for thickness/width
                     segments = data.get("segments", [])
-                    width = ""
-                    initial = 0
-                    final = 0
+                    width = initial = final = ""
                     if segments:
                         seg = segments[0]
                         width = seg.get("width_m", "")
@@ -3306,59 +3261,48 @@ class NewMaterialLineDialog(QDialog):
         row_layout.setSpacing(10)
 
         checkbox = QCheckBox()
-        checkbox.setChecked(True)
+        checkbox.setChecked(True)  # Default checked
         row_layout.addWidget(checkbox)
 
         # From
-        from_edit = QLineEdit()
+        from_edit = QLineEdit(str(item_data['from']) if item_data else "")
         from_edit.setReadOnly(True)
         from_edit.setFixedWidth(130)
-        from_text = item_data['from'] if item_data else ""
-        from_edit.setText(str(from_text))
         row_layout.addWidget(from_edit)
 
         row_layout.addWidget(QLabel("→"), alignment=Qt.AlignCenter)
 
         # To
-        to_edit = QLineEdit()
+        to_edit = QLineEdit(str(item_data['to']) if item_data else "")
         to_edit.setReadOnly(True)
         to_edit.setFixedWidth(130)
-        to_text = item_data['to'] if item_data else ""
-        to_edit.setText(str(to_text))
         row_layout.addWidget(to_edit)
 
-        # Material Name
-        name_label = QLineEdit()
+        # Reference Name
+        name_label = QLineEdit(item_data['name'] if item_data else "Unknown")
         name_label.setReadOnly(True)
-        name_label.setFixedWidth(180)
-        name_text = item_data['name'] if item_data else "Unknown"
-        name_label.setText(name_text)
+        name_label.setFixedWidth(200)
         row_layout.addWidget(name_label, alignment=Qt.AlignCenter)
 
         # Width
         width_edit = QLineEdit()
-        width_edit.setFixedWidth(80)
-        if item_data:
-            w = item_data['width']
-            width_edit.setText(str(w) if w not in ("", None, 0) else "")
+        width_edit.setFixedWidth(100)
+        if item_data and item_data['width'] not in ("", None):
+            width_edit.setText(str(item_data['width']))
         row_layout.addWidget(width_edit, alignment=Qt.AlignCenter)
 
         # Initial Thickness
         initial_edit = QLineEdit()
-        initial_edit.setFixedWidth(120)
-        if item_data:
-            thick = item_data['initial']
-            if thick > 0:
-                initial_edit.setText(f"{thick * 1000:.0f} mm")
+        initial_edit.setFixedWidth(130)
+        if item_data and item_data['initial'] > 0:
+            initial_edit.setText(f"{item_data['initial'] * 1000:.0f} mm")
         row_layout.addWidget(initial_edit, alignment=Qt.AlignCenter)
 
         # After Rolling
         final_edit = QLineEdit()
-        final_edit.setFixedWidth(120)
-        if item_data:
-            final = item_data['final']
-            if final > 0:
-                final_edit.setText(f"{final * 1000:.0f} mm")
+        final_edit.setFixedWidth(130)
+        if item_data and item_data['final'] > 0:
+            final_edit.setText(f"{item_data['final'] * 1000:.0f} mm")
         row_layout.addWidget(final_edit, alignment=Qt.AlignCenter)
 
         row_layout.addStretch()
@@ -3375,46 +3319,79 @@ class NewMaterialLineDialog(QDialog):
         }
 
     def on_save(self):
-        updated = []
+        """Collect data from checked rows and build full material data"""
+        updated_segments = []
+        checked_refs = []
+
         for row in self.segment_rows:
             if not row['checkbox'].isChecked():
                 continue
+
+            ref_name = row['material_name'].text().strip()
+            if ref_name.lower() == "construction":
+                checked_refs.append("construction")
+            else:
+                checked_refs.append(ref_name)
+
             w = row['width'].text().strip()
             i = row['initial'].text().strip()
             f = row['final'].text().strip()
+
             if not w:
-                QMessageBox.warning(self, "Error", "Width required")
+                QMessageBox.warning(self, "Error", f"Width required for {ref_name}")
                 return
             try:
                 width_m = float(w)
             except:
-                QMessageBox.warning(self, "Error", "Invalid width")
+                QMessageBox.warning(self, "Error", f"Invalid width for {ref_name}")
                 return
 
-            def parse_mm(t):
-                if not t: return 0.0
-                t = t.lower().replace("mm", "").strip()
-                try: return float(t) / 1000.0
+            def parse_mm(text):
+                if not text: return 0.0
+                text = text.lower().replace("mm", "").strip()
+                try: return float(text) / 1000.0
                 except: return None
 
             init_m = parse_mm(i)
             final_m = parse_mm(f)
             if (i and init_m is None) or (f and final_m is None):
-                QMessageBox.warning(self, "Error", "Invalid thickness")
+                QMessageBox.warning(self, "Error", f"Invalid thickness for {ref_name}")
                 return
 
-            updated.append({
+            updated_segments.append({
                 'width_m': width_m,
                 'material_thickness_m': init_m or 0.0,
                 'after_rolling_thickness_m': final_m or 0.0
             })
 
-        if not updated:
-            QMessageBox.warning(self, "Error", "No segments selected")
+        if not updated_segments:
+            QMessageBox.warning(self, "Error", "At least one reference must be selected")
             return
 
-        self.updated_segments = updated
+        material_name = self.name_input.text().strip()
+        if not material_name:
+            QMessageBox.warning(self, "Error", "Material line name is required")
+            return
+
+        material_type = self.type_input.text().strip()
+
+        # Unique references
+        unique_refs = []
+        for r in checked_refs:
+            if r not in unique_refs:
+                unique_refs.append(r)
+
+        ref_layer_value = unique_refs[0] if len(unique_refs) == 1 else unique_refs
+
+        self.result_data = {
+            'name': material_name,
+            'material_type': material_type,
+            'ref_layer': ref_layer_value,
+            'segments': updated_segments
+        }
+
         self.accept()
 
-    def get_updated_segments(self):
-        return getattr(self, 'updated_segments', [])
+    def get_material_data(self):
+        """Return the collected material data"""
+        return getattr(self, 'result_data', None)
