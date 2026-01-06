@@ -3039,17 +3039,16 @@ class MaterialSegmentDialog(QDialog):
 # ======================================================================================================================================================================
 class NewMaterialLineDialog(QDialog):
     """Dialog for creating new material lines after the first one.
-       Shows baseline + previous materials as rows.
-       User checks which ones to reference, edits width/thickness per row.
-       On Save → returns full material data including selected ref_layer(s)
-    """
+       Intelligently splits references using EXACT chainage strings from JSON files."""
     def __init__(self, material_config=None, parent=None):
         super().__init__(parent)
         self.parent = parent
         self.material_config = material_config or {}
-        self.table_data = []  # List of dicts: one per baseline/material
+        self.table_data = []
+        self.is_edit_mode = bool(material_config and material_config.get('name'))
 
-        self.setWindowTitle("Material Segments")
+        title = "Edit Material Line" if self.is_edit_mode else "New Material Line Configuration"
+        self.setWindowTitle(title)
         self.setModal(True)
         self.setMinimumWidth(1100)
         self.setStyleSheet("""
@@ -3088,8 +3087,7 @@ class NewMaterialLineDialog(QDialog):
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(20)
 
-        # Title
-        title_label = QLabel("New Material Line Configuration")
+        title_label = QLabel(title)
         title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #000000; padding-bottom: 15px;")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
@@ -3099,9 +3097,14 @@ class NewMaterialLineDialog(QDialog):
         name_label = QLabel("Material line name:")
         name_label.setFixedWidth(150)
         self.name_input = QLineEdit()
-        default_name = f"Material Line - {len(self.parent.material_configs) + 1}"
-        self.name_input.setText(default_name)
-        self.name_input.setPlaceholderText("Enter material line name")
+        
+        # Always start empty — user types whatever they want
+        self.name_input.clear()
+        self.name_input.setPlaceholderText("Enter any name: e.g. GSB, WMM, DBM, Subbase, m1")
+        
+        # Optional: helpful tooltip
+        self.name_input.setToolTip("Type the exact name for this material layer (fully customizable)")
+
         name_layout.addWidget(name_label)
         name_layout.addWidget(self.name_input, 1)
         layout.addLayout(name_layout)
@@ -3112,6 +3115,10 @@ class NewMaterialLineDialog(QDialog):
         type_label.setFixedWidth(150)
         self.type_input = QLineEdit()
         self.type_input.setPlaceholderText("Enter material type (e.g., GSB, WMM, Soil, Stone)")
+        
+        if self.is_edit_mode:
+            self.type_input.setText(self.material_config.get('material_type', ''))
+        
         type_layout.addWidget(type_label)
         type_layout.addWidget(self.type_input, 1)
         layout.addLayout(type_layout)
@@ -3121,10 +3128,7 @@ class NewMaterialLineDialog(QDialog):
         table_layout = QVBoxLayout(table_widget)
         table_layout.setSpacing(15)
 
-        # Header
         header = QHBoxLayout()
-        # header.addWidget(QLabel("Use as Ref"), 0, Qt.AlignLeft)
-
         headers = ["From", "→", "To", "Reference Name", "Width (m)", "Initial Thickness", "After Rolling"]
         for i, text in enumerate(headers):
             label = QLabel(text)
@@ -3144,12 +3148,12 @@ class NewMaterialLineDialog(QDialog):
 
         if self.table_data:
             for idx, item in enumerate(self.table_data):
-                row = self.create_row(idx, item)
+                row = self.create_row(idx, item, is_edit_mode=self.is_edit_mode)
                 table_layout.addLayout(row['layout'])
                 self.segment_rows.append(row)
         else:
             for i in range(3):
-                row = self.create_row(i, None)
+                row = self.create_row(i, None, is_edit_mode=False)
                 table_layout.addLayout(row['layout'])
                 self.segment_rows.append(row)
 
@@ -3170,7 +3174,7 @@ class NewMaterialLineDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def load_table_data(self):
-        """Load Construction baseline + all existing material JSONs"""
+        """Load and split references using EXACT chainage strings from JSON files."""
         self.table_data = []
 
         if not self.parent or not hasattr(self.parent, 'current_construction_layer_path'):
@@ -3180,91 +3184,177 @@ class NewMaterialLineDialog(QDialog):
         worksheet_root = os.path.abspath(os.path.join(construction_path, "..", ".."))
         designs_path = os.path.join(worksheet_root, "designs")
 
-        # 1. Construction baseline
-        if self.material_config and str(self.material_config.get('ref_layer', '')).lower() == 'construction':
-            const_config_path = os.path.join(construction_path, "Construction_Layer_config.txt")
-            ref_design_layer = ""
-            if os.path.exists(const_config_path):
-                try:
-                    with open(const_config_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    ref_design_layer = data.get("reference_layer_2d", "")
-                except: pass
+        # === Step 1: Get Construction baseline full range (with exact strings) ===
+        overall_start_str = overall_end_str = ""
+        overall_start_m = overall_end_m = None
 
-            baseline_path = None
-            if ref_design_layer:
-                candidate = os.path.join(designs_path, ref_design_layer, "construction_baseline.json")
-                if os.path.exists(candidate):
-                    baseline_path = candidate
+        const_config_path = os.path.join(construction_path, "Construction_Layer_config.txt")
+        ref_design_layer = ""
+        if os.path.exists(const_config_path):
+            try:
+                with open(const_config_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                ref_design_layer = data.get("reference_layer_2d", "")
+            except: pass
 
-            if baseline_path and os.path.exists(baseline_path):
-                try:
-                    with open(baseline_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    polylines = data.get("polylines", [])
-                    all_pts = []
-                    for poly in polylines:
-                        all_pts.extend(poly.get("points", []))
-                    if all_pts:
-                        all_pts.sort(key=lambda p: p.get("chainage_m", 0))
-                        first = all_pts[0]
-                        last = all_pts[-1]
-                        self.table_data.append({
-                            'from': first.get("chainage_m", 0.000),
-                            'to': last.get("chainage_m", 0.000),
-                            'name': "Construction",
-                            'width': "",
-                            'initial': 0,
-                            'final': 0
-                        })
-                except Exception as e:
-                    print(f"Error loading construction baseline: {e}")
+        baseline_path = None
+        if ref_design_layer:
+            candidate = os.path.join(designs_path, ref_design_layer, "construction_baseline.json")
+            if os.path.exists(candidate):
+                baseline_path = candidate
 
-        # 2. All existing material JSON files
+        if baseline_path and os.path.exists(baseline_path):
+            try:
+                with open(baseline_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                polylines = data.get("polylines", [])
+                all_pts = []
+                for poly in polylines:
+                    all_pts.extend(poly.get("points", []))
+                if all_pts:
+                    all_pts.sort(key=lambda p: p.get("chainage_m", 0))
+                    first = all_pts[0]
+                    last = all_pts[-1]
+                    overall_start_m = first.get("chainage_m")
+                    overall_end_m = last.get("chainage_m")
+                    overall_start_str = first.get("chainage_str", f"{overall_start_m:.3f}" if overall_start_m else "")
+                    overall_end_str = last.get("chainage_str", f"{overall_end_m:.3f}" if overall_end_m else "")
+            except Exception as e:
+                print(f"Error loading construction baseline: {e}")
+
+        if not overall_start_str or not overall_end_str:
+            return
+
+        # === Step 2: Collect all existing material lines with their EXACT chainage strings ===
+        material_coverages = []  # List of (start_m, end_m, name, from_str, to_str, json_data)
+
+        known_non_material = {
+            "zero_line_config.json",
+            "construction_layer_config.txt",
+            "worksheet_config.json"
+        }
+
         for filename in os.listdir(construction_path):
-            if filename.lower().endswith(".json") and "material" in filename.lower():
-                json_path = os.path.join(construction_path, filename)
-                try:
-                    with open(json_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
+            if not filename.lower().endswith(".json"):
+                continue
+            if filename in known_non_material:
+                continue
 
-                    material_name = data.get("material_line_name", os.path.splitext(filename)[0])
+            json_path = os.path.join(construction_path, filename)
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
 
-                    from_info = data.get("overall_from_chainage", {})
-                    to_info = data.get("overall_to_chainage", {})
+                if not (
+                    "material_line_name" in data or
+                    "material_line_id" in data or
+                    "segments" in data or
+                    "overall_from_chainage" in data
+                ):
+                    continue
 
-                    from_str = from_info.get("chainage_str", f"{from_info.get('chainage_m', 0):.3f}")
-                    to_str = to_info.get("chainage_str", f"{to_info.get('chainage_m', 0):.3f}")
+                material_name = (
+                    data.get("material_line_name") or
+                    data.get("material_line_id") or
+                    data.get("name") or
+                    os.path.splitext(filename)[0]
+                )
 
-                    segments = data.get("segments", [])
-                    width = initial = final = ""
-                    if segments:
-                        seg = segments[0]
-                        width = seg.get("width_m", "")
-                        initial = seg.get("material_thickness_m", 0)
-                        final = seg.get("after_rolling_thickness_m", 0)
+                from_info = data.get("overall_from_chainage", {})
+                to_info = data.get("overall_to_chainage", {})
 
-                    self.table_data.append({
-                        'from': from_str,
-                        'to': to_str,
-                        'name': material_name,
-                        'width': width,
-                        'initial': initial,
-                        'final': final
-                    })
+                start_m = from_info.get("chainage_m")
+                end_m = to_info.get("chainage_m")
+                from_str = from_info.get("chainage_str", f"{start_m:.3f}" if start_m is not None else "")
+                to_str = to_info.get("chainage_str", f"{end_m:.3f}" if end_m is not None else "")
 
-                except Exception as e:
-                    print(f"Error loading material {filename}: {e}")
+                if start_m is not None and end_m is not None and from_str and to_str and end_m > start_m:
+                    material_coverages.append((start_m, end_m, material_name, from_str, to_str, data))
 
-    def create_row(self, index, item_data):
+            except Exception as e:
+                print(f"Skipped {filename}: {e}")
+
+        # Sort by start chainage
+        material_coverages.sort(key=lambda x: x[0])
+
+        # === Step 3: Build segmented rows using exact strings ===
+        segments = []
+        current_pos_m = overall_start_m
+
+        for start_m, end_m, mat_name, from_str, to_str, mat_data in material_coverages:
+            # Add Construction segment before this material (if gap exists)
+            if current_pos_m is not None and start_m > current_pos_m + 0.001:  # tolerance for float
+                segments.append({
+                    'from': overall_start_str if len(segments) == 0 else segments[-1]['to'],
+                    'to': from_str,
+                    'name': "Construction",
+                    'width': "",
+                    'initial': 0,
+                    'final': 0
+                })
+
+            # Add the material segment with exact strings
+            width = initial = final = ""
+            segs = mat_data.get("segments", [])
+            if segs:
+                s = segs[0]
+                width = s.get("width_m", "")
+                initial = s.get("material_thickness_m", 0)
+                final = s.get("after_rolling_thickness_m", 0)
+
+            segments.append({
+                'from': from_str,
+                'to': to_str,
+                'name': mat_name,
+                'width': width,
+                'initial': initial,
+                'final': final
+            })
+
+            current_pos_m = end_m
+
+        # Add final Construction segment
+        if current_pos_m is not None and overall_end_m > current_pos_m + 0.001:
+            last_to = overall_end_str
+            from_for_last = material_coverages[-1][4] if material_coverages else overall_start_str
+            segments.append({
+                'from': from_for_last,
+                'to': last_to,
+                'name': "Construction",
+                'width': "",
+                'initial': 0,
+                'final': 0
+            })
+
+        # If no materials, just full construction
+        if not segments:
+            segments.append({
+                'from': overall_start_str,
+                'to': overall_end_str,
+                'name': "Construction",
+                'width': "",
+                'initial': 0,
+                'final': 0
+            })
+
+        self.table_data = segments
+
+    def create_row(self, index, item_data, is_edit_mode=False):
         row_layout = QHBoxLayout()
         row_layout.setSpacing(10)
 
         checkbox = QCheckBox()
-        checkbox.setChecked(True)  # Default checked
+        if is_edit_mode and item_data:
+            ref_layer = self.material_config.get('ref_layer')
+            if isinstance(ref_layer, list):
+                checkbox.setChecked(item_data['name'] in ref_layer)
+            else:
+                checkbox.setChecked(str(item_data['name']).lower() == str(ref_layer).lower())
+        else:
+            checkbox.setChecked(True)
+
         row_layout.addWidget(checkbox)
 
-        # From
         from_edit = QLineEdit(str(item_data['from']) if item_data else "")
         from_edit.setReadOnly(True)
         from_edit.setFixedWidth(130)
@@ -3272,37 +3362,36 @@ class NewMaterialLineDialog(QDialog):
 
         row_layout.addWidget(QLabel("→"), alignment=Qt.AlignCenter)
 
-        # To
         to_edit = QLineEdit(str(item_data['to']) if item_data else "")
         to_edit.setReadOnly(True)
         to_edit.setFixedWidth(130)
         row_layout.addWidget(to_edit)
 
-        # Reference Name
         name_label = QLineEdit(item_data['name'] if item_data else "Unknown")
         name_label.setReadOnly(True)
         name_label.setFixedWidth(200)
         row_layout.addWidget(name_label, alignment=Qt.AlignCenter)
 
-        # Width
         width_edit = QLineEdit()
         width_edit.setFixedWidth(100)
         if item_data and item_data['width'] not in ("", None):
             width_edit.setText(str(item_data['width']))
         row_layout.addWidget(width_edit, alignment=Qt.AlignCenter)
 
-        # Initial Thickness
         initial_edit = QLineEdit()
         initial_edit.setFixedWidth(130)
-        if item_data and item_data['initial'] > 0:
-            initial_edit.setText(f"{item_data['initial'] * 1000:.0f} mm")
+        if item_data and item_data['initial'] not in ("", None, 0):
+            val = item_data['initial']
+            if isinstance(val, (int, float)):
+                initial_edit.setText(f"{val * 1000:.0f} mm")
         row_layout.addWidget(initial_edit, alignment=Qt.AlignCenter)
 
-        # After Rolling
         final_edit = QLineEdit()
         final_edit.setFixedWidth(130)
-        if item_data and item_data['final'] > 0:
-            final_edit.setText(f"{item_data['final'] * 1000:.0f} mm")
+        if item_data and item_data['final'] not in ("", None, 0):
+            val = item_data['final']
+            if isinstance(val, (int, float)):
+                final_edit.setText(f"{val * 1000:.0f} mm")
         row_layout.addWidget(final_edit, alignment=Qt.AlignCenter)
 
         row_layout.addStretch()
@@ -3318,8 +3407,8 @@ class NewMaterialLineDialog(QDialog):
             'final': final_edit
         }
 
+
     def on_save(self):
-        """Collect data from checked rows and build full material data"""
         updated_segments = []
         checked_refs = []
 
@@ -3328,10 +3417,7 @@ class NewMaterialLineDialog(QDialog):
                 continue
 
             ref_name = row['material_name'].text().strip()
-            if ref_name.lower() == "construction":
-                checked_refs.append("construction")
-            else:
-                checked_refs.append(ref_name)
+            checked_refs.append(ref_name)
 
             w = row['width'].text().strip()
             i = row['initial'].text().strip()
@@ -3359,32 +3445,59 @@ class NewMaterialLineDialog(QDialog):
                 return
 
             updated_segments.append({
-                'width_m': width_m,
-                'material_thickness_m': init_m or 0.0,
-                'after_rolling_thickness_m': final_m or 0.0
+                'from_chainage': row['from'].text().strip(),
+                'to_chainage': row['to'].text().strip(),
+                'width': width_m,
+                'initial_thickness': init_m or 0.0,
+                'after_rolling': final_m or 0.0
             })
 
         if not updated_segments:
             QMessageBox.warning(self, "Error", "At least one reference must be selected")
             return
 
+        # === SECURITY: Force user to enter a name ===
         material_name = self.name_input.text().strip()
         if not material_name:
-            QMessageBox.warning(self, "Error", "Material line name is required")
+            QMessageBox.warning(self, "Required Field", "Please enter a Material line name.")
             return
+
+        # Use the validated name
+        proposed_name = material_name
+
+        # === ENFORCE UNIQUE NAME (your existing logic preserved) ===
+        existing_names = [cfg['name'] for cfg in getattr(self.parent, 'material_configs', [])]
+
+        if self.is_edit_mode:
+            current_original_name = self.material_config.get('name', '')
+            if proposed_name != current_original_name and proposed_name in existing_names:
+                QMessageBox.warning(self, "Duplicate Name",
+                                    f"A material named '{proposed_name}' already exists.\n"
+                                    "Please choose a unique name.")
+                return
+        else:
+            if proposed_name in existing_names:
+                counter = 1
+                base_name = proposed_name
+                while f"{base_name} ({counter})" in existing_names:
+                    counter += 1
+                unique_name = f"{base_name} ({counter})"
+                reply = QMessageBox.question(self, "Name Conflict",
+                                             f"'{proposed_name}' already exists.\n"
+                                             f"Use '{unique_name}' instead?",
+                                             QMessageBox.Yes | QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    proposed_name = unique_name
+                else:
+                    return
 
         material_type = self.type_input.text().strip()
 
-        # Unique references
-        unique_refs = []
-        for r in checked_refs:
-            if r not in unique_refs:
-                unique_refs.append(r)
-
+        unique_refs = list(dict.fromkeys(checked_refs))
         ref_layer_value = unique_refs[0] if len(unique_refs) == 1 else unique_refs
 
         self.result_data = {
-            'name': material_name,
+            'name': proposed_name,
             'material_type': material_type,
             'ref_layer': ref_layer_value,
             'segments': updated_segments
@@ -3393,5 +3506,4 @@ class NewMaterialLineDialog(QDialog):
         self.accept()
 
     def get_material_data(self):
-        """Return the collected material data"""
         return getattr(self, 'result_data', None)

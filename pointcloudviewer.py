@@ -1066,7 +1066,7 @@ class PointCloudViewer(ApplicationUI):
 # =======================================================================================================================================
     def open_material_line_dialog(self):
         """Opens the appropriate dialog based on whether material_lines_config.txt exists.
-           Now also creates and maintains material_lines_config.txt with full structure."""
+        Now also creates and maintains material_lines_config.txt with full structure."""
         if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
             QMessageBox.warning(self, "No Worksheet", "Please create or open a worksheet first.")
             return
@@ -1079,7 +1079,7 @@ class PointCloudViewer(ApplicationUI):
         current_construction_path = self.construction_layer_info.get('folder')
         if not current_construction_path or not os.path.exists(current_construction_path):
             QMessageBox.critical(self, "Path Error", 
-                                 f"Construction layer folder not found:\n{current_construction_path}")
+                                f"Construction layer folder not found:\n{current_construction_path}")
             return
 
         self.current_construction_layer_path = current_construction_path
@@ -1091,7 +1091,7 @@ class PointCloudViewer(ApplicationUI):
             "worksheet_name": self.current_worksheet_name or "Unknown Worksheet",
             "project_name": getattr(self, 'project_name', 'Project_1'),
             "created_by": getattr(self, 'current_user', 'admin123'),
-            "created_at": "2026-01-05T14:53:39.382065",  # Current timestamp as per date
+            "created_at": "2026-01-05T14:53:39.382065",
             "material_line": []
         }
 
@@ -1147,7 +1147,7 @@ class PointCloudViewer(ApplicationUI):
                 self.message_text.append(f"Reference Baseline: {config['ref_layer']}")
                 self.message_text.append("")
 
-                # === Create and save material_lines_config.txt for the first time ===
+                # Save to config
                 new_config_entry = {
                     "name": material_data['name'],
                     "material_type": material_data['material_type'],
@@ -1163,20 +1163,15 @@ class PointCloudViewer(ApplicationUI):
                     QMessageBox.critical(self, "Error", f"Failed to create material_lines_config.txt:\n{e}")
 
         else:
-            # === material_lines_config.txt exists – use NewMaterialLineDialog ===
+            # === Use NewMaterialLineDialog for subsequent materials ===
             try:
-                # We already loaded config_data above, so reuse it
                 material_lines = config_data.get("material_line", [])
-
                 if not material_lines:
-                    QMessageBox.information(self, "No Materials", "No material lines defined yet in material_lines_config.txt.")
+                    QMessageBox.information(self, "No Materials", "No material lines defined yet.")
                     return
 
-                # Prepare default values (not strictly needed anymore since NewMaterialLineDialog doesn't use them directly)
-                latest_material = material_lines[-1]
-                default_name = f"Material Line - {len(material_lines) + 1}"
+                default_name = f"Material Line - {len(getattr(self.parent, 'material_configs', [])) + 1 if hasattr(self, 'parent') else len(self.material_configs) + 1}"
 
-                # Pass minimal config – NewMaterialLineDialog now loads table data independently
                 material_config_for_dialog = {
                     'name': default_name,
                     'material_type': "",
@@ -1193,7 +1188,6 @@ class PointCloudViewer(ApplicationUI):
                     '_display_ref_name': "Construction"
                 }
 
-            # Use NewMaterialLineDialog
             dialog = NewMaterialLineDialog(material_config=material_config_for_dialog, parent=self)
 
             if dialog.exec_() == QDialog.Accepted:
@@ -1208,7 +1202,7 @@ class PointCloudViewer(ApplicationUI):
                     'name': material_data['name'],
                     'folder_name': folder_name,
                     'material_type': material_data['material_type'],
-                    'ref_layer': material_data['ref_layer'],
+                    'ref_layer': material_data['ref_layer'],  # str or list
                     'visible': True,
                     'path': material_folder_full_path
                 }
@@ -1216,7 +1210,7 @@ class PointCloudViewer(ApplicationUI):
                 self.material_configs.append(config)
                 self.create_material_line_entry(config)
 
-                if len(self.material_configs) == 1:  # In case first was skipped somehow
+                if len(self.material_configs) == 1:
                     self.add_material_line_button.setStyleSheet("""
                         QPushButton {
                             background-color: #FFA500;
@@ -1233,10 +1227,10 @@ class PointCloudViewer(ApplicationUI):
                 self.message_text.append("Material Line Created Successfully!")
                 self.message_text.append(f"Name: {config['name']}")
                 self.message_text.append(f"Material Type: {config['material_type']}")
-                self.message_text.append(f"Reference Baseline: {config['ref_layer']}")
+                self.message_text.append(f"Reference Layer(s): {config['ref_layer']}")
                 self.message_text.append("")
 
-                # === Append new entry to material_lines_config.txt ===
+                # Update config file
                 new_config_entry = {
                     "name": material_data['name'],
                     "material_type": material_data['material_type'],
@@ -1250,57 +1244,78 @@ class PointCloudViewer(ApplicationUI):
                 except Exception as e:
                     QMessageBox.critical(self, "Error", f"Failed to update material_lines_config.txt:\n{e}")
 
-                # === Your original segment processing code – FULLY PRESERVED ===
+                # === PROCESS SEGMENTS FROM DIALOG (Multiple references supported) ===
+                material_idx = len(self.material_configs) - 1
+
                 def parse_chainage(ch_str):
-                    ch_str = ch_str.strip()
+                    ch_str = str(ch_str).strip()
                     if '+' in ch_str:
                         parts = ch_str.split('+')
                         if len(parts) == 2:
                             try:
-                                km = int(parts[0].strip())
-                                m = float(parts[1].strip())
+                                km = int(parts[0])
+                                m = float(parts[1])
                                 return km * 1000 + m
-                            except ValueError:
-                                return None
-                    elif '/' in ch_str:
-                        parts = ch_str.split('/')
-                        if len(parts) == 2:
-                            try:
-                                km = int(parts[0].strip())
-                                m = float(parts[1].strip())
-                                return km * 1000 + m
-                            except ValueError:
-                                return None
-                    else:
-                        try:
-                            return float(ch_str)
-                        except ValueError:
-                            return None
+                            except:
+                                pass
+                    try:
+                        return float(ch_str)
+                    except:
+                        return None
 
-                material_idx = len(self.material_configs) - 1
+                # Load construction baseline once for elevation reference
+                ref_xs, ref_ys = self._load_baseline_from_design_layer({'ref_layer': 'construction'})
+                if ref_xs is None or len(ref_xs) == 0:
+                    self.message_text.append("Error: Could not load construction baseline for elevation.")
+                    return
+
+                chainage_to_elev = dict(zip(ref_xs, ref_ys))
+
                 for s_idx, seg in enumerate(material_data['segments'], 1):
                     from_str = seg['from_chainage']
                     to_str = seg['to_chainage']
                     from_m = parse_chainage(from_str)
                     to_m = parse_chainage(to_str)
+
                     if from_m is None or to_m is None or to_m <= from_m:
-                        self.message_text.append(f"Invalid chainage for segment {s_idx}: {from_str} -> {to_str}")
+                        self.message_text.append(f"Invalid chainage in segment {s_idx}: {from_str} → {to_str}")
                         continue
 
-                    thickness_mm_str = seg.get('initial_thickness', '0')
-                    thickness_mm = float(thickness_mm_str.replace(' mm', '').strip() or 0)
-                    thickness_m = thickness_mm / 1000.0
+                    # Safely parse thickness values
+                    try:
+                        init_val = seg.get('initial_thickness', 0)
+                        if isinstance(init_val, str):
+                            init_val = init_val.lower().replace('mm', '').strip()
+                            thickness_m = float(init_val or 0) / 1000.0
+                        else:
+                            thickness_m = float(init_val or 0) / 1000.0
+                    except:
+                        thickness_m = 0.0
 
-                    after_mm_str = seg.get('after_rolling', '0')
-                    after_mm = float(after_mm_str.replace(' mm', '').strip() or 0)
-                    after_m = after_mm / 1000.0
+                    try:
+                        after_val = seg.get('after_rolling', 0)
+                        if isinstance(after_val, str):
+                            after_val = after_val.lower().replace('mm', '').strip()
+                            after_m = float(after_val or 0) / 1000.0
+                        else:
+                            after_m = float(after_val or 0) / 1000.0
+                    except:
+                        after_m = 0.0
 
-                    width_str = seg.get('width', '0')
-                    width_m = float(width_str or 0)
+                    try:
+                        width_m = float(seg.get('width', 0))
+                    except:
+                        width_m = 0.0
+
+                    # Get base elevation from construction at midpoint
+                    mid_m = (from_m + to_m) / 2
+                    base_elevation = chainage_to_elev.get(mid_m, 0.0)
+
+                    top_elevation = base_elevation + thickness_m
 
                     polyline_points = [
-                        {"chainage_m": from_m, "relative_elevation_m": thickness_m},
-                        {"chainage_m": to_m, "relative_elevation_m": thickness_m}
+                        {"chainage_m": from_m, "relative_elevation_m": top_elevation},
+                        {"chainage_m": to_m, "relative_elevation_m": top_elevation}
                     ]
 
                     self.save_material_segment_to_json(
@@ -1318,9 +1333,10 @@ class PointCloudViewer(ApplicationUI):
                         polyline_points=polyline_points
                     )
 
-                    permanent_line = self.ax.plot(
+                    # Draw top line
+                    line = self.ax.plot(
                         [from_m, to_m],
-                        [thickness_m, thickness_m],
+                        [top_elevation, top_elevation],
                         color='orange',
                         linewidth=3,
                         linestyle='-',
@@ -1333,10 +1349,11 @@ class PointCloudViewer(ApplicationUI):
 
                     if material_idx not in self.material_polylines_artists:
                         self.material_polylines_artists[material_idx] = []
-                    self.material_polylines_artists[material_idx].append(permanent_line)
+                    self.material_polylines_artists[material_idx].append(line)
 
+                    # Label
                     mid_x = (from_m + to_m) / 2
-                    mid_y = thickness_m + 0.25
+                    mid_y = top_elevation + 0.25
                     label_text = f"M{material_idx+1}-{s_idx}"
 
                     annot = self.ax.annotate(
@@ -1356,10 +1373,12 @@ class PointCloudViewer(ApplicationUI):
                         'to_chainage_m': to_m,
                         'config': {}
                     }
+
                     if material_idx not in self.material_segment_labels:
                         self.material_segment_labels[material_idx] = []
                     self.material_segment_labels[material_idx].append(annot)
 
+                    # Draw filling with hatching (only in this segment)
                     self.draw_material_filling(
                         from_chainage_m=from_m,
                         to_chainage_m=to_m,
@@ -1368,7 +1387,9 @@ class PointCloudViewer(ApplicationUI):
                         material_config=self.material_configs[material_idx],
                         color='#FF9800',
                         alpha=0.6,
-                        width_m=width_m
+                        width_m=width_m,
+                        hatch_pattern='/',
+                        base_elevation=base_elevation
                     )
 
                 self.canvas.draw_idle()
@@ -1630,10 +1651,10 @@ class PointCloudViewer(ApplicationUI):
         self.three_D_frame.setVisible(dimension == "3D")
         self.two_D_frame.setVisible(dimension == "2D")
 
-        self.reset_all()
-        self.clear_baseline_planes()
-        self.clear_reference_lines()          # Clear previous 2D lines
-        self.clear_reference_actors()         # Clear previous 3D actors
+        # self.reset_all()
+        # self.clear_baseline_planes()
+        # self.clear_reference_lines()          # Clear previous 2D lines
+        # self.clear_reference_actors()         # Clear previous 3D actors
 
         # Load layer config file
         config_filename = "Construction_Layer_config.txt" if subfolder_type == "construction" else "design_layer_config.txt"
@@ -2173,7 +2194,6 @@ class PointCloudViewer(ApplicationUI):
         return loaded_baselines
     
 # ===========================================================================================================================================================
-
     def save_current_design_layer(self):
         """Save checked baselines using the CURRENT user-confirmed width from dialog"""
         if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
@@ -2202,6 +2222,14 @@ class PointCloudViewer(ApplicationUI):
         dir_vec = self.zero_end_point - self.zero_start_point
         zero_length = self.total_distance
         ref_z = self.zero_start_z
+
+        # Helper function to format chainage as "101+061"
+        def format_chainage_str(chainage_m: float) -> str:
+            if not hasattr(self, 'zero_start_km') or self.zero_start_km is None:
+                return f"{chainage_m:.3f}m"
+            km_part = int(self.zero_start_km)  # e.g., 101
+            metres_part = chainage_m % 1000
+            return f"{km_part}+{metres_part:03.0f}"
 
         baseline_checkboxes = {
             'surface': self.surface_baseline,
@@ -2234,7 +2262,7 @@ class PointCloudViewer(ApplicationUI):
                 "baseline_type": ltype.replace('_', ' ').title(),
                 "baseline_key": ltype,
                 "color": self.line_types[ltype]['color'],
-                "width_meters": float(width_m),  # ← This will now be 20.0, not 10.0
+                "width_meters": float(width_m),
                 "zero_line_start": self.zero_start_point.tolist(),
                 "zero_line_end": self.zero_end_point.tolist(),
                 "zero_start_elevation": float(ref_z),
@@ -2252,6 +2280,7 @@ class PointCloudViewer(ApplicationUI):
                     world_point = [float(pos_along[0]), float(pos_along[1]), float(abs_z)]
                     poly_3d_points.append({
                         "chainage_m": float(dist),
+                        "chainage_str": format_chainage_str(dist),  # ← ADDED: formatted chainage string
                         "relative_elevation_m": float(rel_z),
                         "world_coordinates": world_point
                     })
@@ -2261,7 +2290,9 @@ class PointCloudViewer(ApplicationUI):
                     end_chainage = poly_3d_points[-1]["chainage_m"]
                     baseline_data["polylines"].append({
                         "start_chainage_m": float(start_chainage),
+                        "start_chainage_str": format_chainage_str(start_chainage),  # ← ADDED
                         "end_chainage_m": float(end_chainage),
+                        "end_chainage_str": format_chainage_str(end_chainage),      # ← ADDED
                         "points": poly_3d_points
                     })
 
@@ -5251,11 +5282,108 @@ class PointCloudViewer(ApplicationUI):
             
 # ============================================================================================================================
 # Define the function for the reset all:
+
     def reset_all(self):
         """Reset ALL lines from the graph"""
         # First call reset_action to handle any current drawing
         self.reset_action()
+
+        # Clear graph
+        self.ax.cla()
+        self.ax.set_xlim(0, 100)
+        self.ax.set_ylim(-5, 5)
+        self.canvas.draw_idle()
+
+        # Clear 3D view
+        if hasattr(self, 'renderer') and self.renderer:
+            actors = self.renderer.GetActors()
+            actors.InitTraversal()
+            actor = actors.GetNextItem()
+            while actor:
+                self.renderer.RemoveActor(actor)
+                actor = actors.GetNextItem()
+            self.renderer.ResetCamera()
+        if hasattr(self, 'vtk_widget') and self.vtk_widget:
+            self.vtk_widget.GetRenderWindow().Render()
         
+
+# Clear baseline planes and other 3D actors
+        self.clear_baseline_planes()
+        self.baseline_plane_actors = []
+        self.material_3d_actors = {}
+        self.curve_3d_actors = []
+
+        # Hide and clear frames/sections
+        if hasattr(self, 'three_d_frame'):
+            self.three_d_frame.setVisible(False)
+            self.three_d_frame.clear() if hasattr(self.three_d_frame, 'clear') else None
+        if hasattr(self, 'two_d_frame'):
+            self.two_d_frame.setVisible(False)
+            self.two_d_frame.clear() if hasattr(self.two_d_frame, 'clear') else None
+        if hasattr(self, 'merger_frame'):
+            self.merger_frame.setVisible(False)
+            self.merger_frame.clear() if hasattr(self.merger_frame, 'clear') else None
+
+        # Clear bottom section (assuming it has widgets/artists)
+        if hasattr(self, 'bottom_section'):
+            self.bottom_section.setVisible(False)
+            for widget in self.bottom_section.findChildren(QWidget):
+                widget.deleteLater()
+
+        # Clear scale section (chainage ticks, zero line, etc.)
+        if hasattr(self, 'scale_section'):
+            self.scale_section.setVisible(False)
+            for widget in self.scale_section.findChildren(QWidget):
+                widget.deleteLater()
+        self.zero_line_set = False
+        if hasattr(self, 'zero_graph_line') and self.zero_graph_line:
+            self.zero_graph_line.remove()
+            self.zero_graph_line = None
+
+        # Clear left section panels (checkboxes, containers)
+        for container in [self.surface_container, self.construction_container, self.road_surface_container,
+                          self.zero_container, self.deck_line_container, self.projection_container,
+                          self.construction_dots_container, getattr(self, 'bridge_zero_container', None)]:
+            if container:
+                container.setVisible(False)
+                for widget in container.findChildren(QWidget):
+                    widget.deleteLater()
+
+        # Clear material widgets and artists
+        for widget in self.material_line_widgets:
+            widget.deleteLater()
+        self.material_line_widgets = []
+        self.material_polylines = {}
+        self.material_polylines_artists = {}
+        self.material_fill_patches = {}
+        self.material_segment_labels = {}
+        self.material_configs = []
+
+        # Clear other states
+        self.line_types = {k: {'polylines': [], 'artists': []} for k in self.line_types}
+        self.baseline_widths = {}
+        self.current_layer_name = None
+        self.current_worksheet_name = None
+        self.current_project_name = None
+        self.current_worksheet_data = {}
+        self.construction_mode_active = False
+        self.material_drawing_active = False
+        self.active_material_index = None
+        self.active_line_type = None
+        self.curve_active = False
+        self.measurement_points = []
+
+        # Clear message text
+        self.message_text.clear()
+
+        # Hide banner/mode if exists
+        if hasattr(self, 'mode_banner'):
+            self.mode_banner.setVisible(False)
+
+        # Reset display worksheet
+        if hasattr(self, 'worksheet_display'):
+            self.worksheet_display.clear()
+
         # Now remove ALL lines from all line types
         for line_type in self.line_types:
             # Remove all artists for this line type
@@ -5753,12 +5881,13 @@ class PointCloudViewer(ApplicationUI):
         )
     # ===========================================================================================================================================================
     def clear_baseline_planes(self):
-        """Remove ALL accumulated baseline plane actors — used only on reset or new worksheet."""
-        for actor in self.baseline_plane_actors:
-            if actor.GetRenderer():
-                self.renderer.RemoveActor(actor)
-        self.baseline_plane_actors.clear()
-        if hasattr(self, 'vtk_widget'):
+        """Clear all baseline plane actors from the 3D view"""
+        if hasattr(self, 'renderer') and self.renderer:
+            for actor in self.baseline_plane_actors:
+                if self.renderer.HasViewProp(actor):
+                    self.renderer.RemoveActor(actor)
+        self.baseline_plane_actors = []
+        if hasattr(self, 'vtk_widget') and self.vtk_widget:
             self.vtk_widget.GetRenderWindow().Render()
 
 # ============================================================================================================================================================
@@ -6159,8 +6288,7 @@ class PointCloudViewer(ApplicationUI):
         return chainage_str
 
 # =======================================================================================================================================
-# MODIFY toggle_material_line_visibility() IN pointcloudviewer.py
-# =======================================================================================================================================
+# MATERIAL LINE HANDLING
     def toggle_material_line_visibility(self, index, state):
         """Activate/deactivate a material line — drawing requires 'Start' button"""
         if 0 <= index < len(self.material_items):
@@ -6191,11 +6319,37 @@ class PointCloudViewer(ApplicationUI):
                 # Show previously saved permanent lines
                 if index in self.material_polylines_artists:
                     for artist in self.material_polylines_artists[index]:
+                        artist.set_visible(True)
                         if artist not in self.ax.lines:
                             self.ax.add_line(artist)
 
-                # NEW: Load and draw saved filling, labels, and 3D plane
-                self.load_and_draw_material_filling(index)
+                # Show saved filling (background + hatching)
+                if index in self.material_fill_patches:
+                    for patch_dict in self.material_fill_patches[index]:
+                        if 'bg' in patch_dict:
+                            patch_dict['bg'].set_visible(True)
+                        if 'hatch' in patch_dict:
+                            patch_dict['hatch'].set_visible(True)
+
+                # Show segment labels
+                if index in self.material_segment_labels:
+                    for label in self.material_segment_labels[index]:
+                        label.set_visible(True)
+
+                # Show 3D actors
+                if index in self.material_3d_actors:
+                    for actor in self.material_3d_actors[index]:
+                        actor.SetVisibility(1)  # 1 = visible
+
+                # NEW: Load and draw saved filling if not already present
+                if index not in self.material_fill_patches:
+                    self.load_and_draw_material_filling(index)
+
+                # Safe 3D render
+                if hasattr(self, 'vtkWidget') and self.vtkWidget:
+                    rw = self.vtkWidget.GetRenderWindow()
+                    if rw:
+                        rw.Render()
 
             else:
                 # Deactivate
@@ -6216,33 +6370,36 @@ class PointCloudViewer(ApplicationUI):
                 # Hide saved lines
                 if index in self.material_polylines_artists:
                     for artist in self.material_polylines_artists[index]:
-                        if artist in self.ax.lines:
-                            artist.remove()
+                        artist.set_visible(False)
 
-                # NEW: Remove filling patches
+                # Hide filling patches
                 if index in self.material_fill_patches:
                     for patch_dict in self.material_fill_patches[index]:
-                        patch_dict['bg'].remove()
-                        patch_dict['hatch'].remove()
-                    del self.material_fill_patches[index]
+                        if 'bg' in patch_dict:
+                            patch_dict['bg'].set_visible(False)
+                        if 'hatch' in patch_dict:
+                            patch_dict['hatch'].set_visible(False)
 
-                # NEW: Remove segment labels
+                # Hide segment labels
                 if index in self.material_segment_labels:
                     for label in self.material_segment_labels[index]:
-                        label.remove()
-                    del self.material_segment_labels[index]
+                        label.set_visible(False)
 
-                # NEW: Remove 3D actors
+                # Hide 3D actors
                 if index in self.material_3d_actors:
                     for actor in self.material_3d_actors[index]:
-                        self.renderer.RemoveActor(actor)
-                    del self.material_3d_actors[index]
-                    self.vtkWidget.GetRenderWindow().Render()
+                        actor.SetVisibility(0)  # 0 = hidden
 
                 self.message_text.append(f"Material line M{index+1} deactivated.")
 
-            self.canvas.draw_idle()
+                # Safe 3D render
+                if hasattr(self, 'vtkWidget') and self.vtkWidget:
+                    rw = self.vtkWidget.GetRenderWindow()
+                    if rw:
+                        rw.Render()
 
+            # Always redraw 2D canvas
+            self.canvas.draw_idle()
     # =====================================================================
     # NEW: Handle ESC key to finish material line drawing
     # =====================================================================
@@ -7269,8 +7426,7 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append("No active drawing mode selected.")
 
 # =======================================================================================================================================
-# ASSUMED EXISTING: on_construction_click (mirror this logic for material - add if missing)
-# =======================================================================================================================================
+# NEW: Construction click handler
     def on_construction_click(self, event):
         """Handle click for new construction dots (existing logic - provided for reference)"""
         # This mirrors your existing construction plotting (adapt if your exact code differs)
@@ -7319,6 +7475,7 @@ class PointCloudViewer(ApplicationUI):
 
         self.canvas.draw_idle()
         self.message_text.append(f"Construction dot P{next_num} placed at {x:.2f}m. Click to configure.")
+
 # =======================================================================================================================================================
 # UPDATE toggle for construction (if exists, add similar activation)
     def toggle_construction_line(self, state):  # Assuming this exists for construction checkbox
@@ -7334,176 +7491,28 @@ class PointCloudViewer(ApplicationUI):
             self.construction_mode_active = False
             self.message_text.append("Construction mode deactivated.")
 
-# =======================================================================================================================================================
-    def draw_material_filling(self, from_chainage_m, to_chainage_m, thickness_m,
-                            material_index, material_config, color='#FF9800', alpha=0.6, width_m=0.0):
-        """
-        Draw 2D hatching + 3D volume for the material.
-        Now safely handles missing baseline.
-        """
-        import numpy as np
-        from matplotlib.patches import Polygon
-        import vtk
-
-        # Initialise containers if needed
-        if not hasattr(self, 'material_fill_patches'):
-            self.material_fill_patches = {}
-        if not hasattr(self, 'material_3d_actors'):
-            self.material_3d_actors = {}
-
-        # Clean previous drawings for this material
-        if material_index in self.material_fill_patches:
-            for p in self.material_fill_patches[material_index]:
-                for patch in p.values():
-                    if patch in self.ax.patches:
-                        patch.remove()
-            self.material_fill_patches[material_index] = []
-
-        if material_index in self.material_3d_actors:
-            for actor in self.material_3d_actors[material_index]:
-                self.renderer.RemoveActor(actor)
-            self.material_3d_actors[material_index] = []
-
-        # Load reference baseline (bottom of material)
-        ref_xs, ref_ys = self._load_baseline_from_design_layer(material_config)
-        if not ref_xs or len(ref_xs) < 2:
-            self.message_text.append("Baseline not loaded — cannot draw filling.")
-            return
-
-        # Load material top line (drawn by user)
-        mat_xs, mat_ys = self._get_material_line_points_for_segment(material_index, from_chainage_m, to_chainage_m)
-        if len(mat_xs) < 2:
-            self.message_text.append("Not enough material points to draw filling.")
-            return
-
-        x_dense = np.array(mat_xs)
-        top_y_dense = np.array(mat_ys)
-        bottom_y_dense = np.interp(x_dense, ref_xs, ref_ys, left=ref_ys[0], right=ref_ys[-1])
-        top_y_dense = np.maximum(top_y_dense, bottom_y_dense)  # ensure top is always above bottom
-
-        # ---------- 2D Hatching ----------
-        vertices = np.vstack([
-            np.column_stack([x_dense, bottom_y_dense]),
-            np.column_stack([x_dense[::-1], top_y_dense[::-1]])
-        ])
-        bg = Polygon(vertices, closed=True, facecolor=color, alpha=0.35, edgecolor='none', zorder=2)
-        hatch = Polygon(vertices, closed=True, facecolor='none', hatch='xx', edgecolor='black', linewidth=0.8, zorder=3)
-        self.ax.add_patch(bg)
-        self.ax.add_patch(hatch)
-        self.material_fill_patches.setdefault(material_index, []).append({'bg': bg, 'hatch': hatch})
-        self.canvas.draw_idle()
-
-        avg_thick_mm = np.mean(top_y_dense - bottom_y_dense) * 1000
-        self.message_text.append(f"2D filling drawn: avg thickness {avg_thick_mm:.0f} mm")
-
-        # ---------- 3D Volume (only if width > 0) ----------
-        if width_m <= 0.01:
-            self.message_text.append("Width ≤ 0 → no 3D volume created.")
-            return
-
-        # Build 3D points with proper perpendicular offset
-        delta = 0.5
-        half_width = width_m / 2.0
-        left_top_pts, right_top_pts = [], []
-        left_bottom_pts, right_bottom_pts = [], []
-
-        for i in range(len(x_dense)):
-            ch = x_dense[i]
-            X, Y, base_Z = self.get_real_coordinates_from_chainage(ch)
-            if X is None:
-                X, Y, base_Z = self.interpolate_xyz(ch)
-
-            # Tangent approximation
-            X1, Y1, _ = self.get_real_coordinates_from_chainage(max(0, ch - delta))
-            X2, Y2, _ = self.get_real_coordinates_from_chainage(min(self.total_distance, ch + delta))
-            if X1 is None: X1, Y1, _ = self.interpolate_xyz(max(0, ch - delta))
-            if X2 is None: X2, Y2, _ = self.interpolate_xyz(min(self.total_distance, ch + delta))
-
-            dir_vec = np.array([X2 - X1, Y2 - Y1])
-            len_dir = np.linalg.norm(dir_vec)
-            if len_dir < 1e-6:
-                continue
-            dir_norm = dir_vec / len_dir
-            perp_norm_2d = np.array([-dir_norm[1], dir_norm[0]])
-
-            offset = np.array([perp_norm_2d[0], perp_norm_2d[1], 0.0]) * half_width
-
-            top_z = base_Z + top_y_dense[i]
-            bottom_z = base_Z + bottom_y_dense[i]
-
-            center_top = np.array([X, Y, top_z])
-            center_bottom = np.array([X, Y, bottom_z])
-
-            left_top_pts.append(center_top + offset)
-            right_top_pts.append(center_top - offset)
-            left_bottom_pts.append(center_bottom + offset)
-            right_bottom_pts.append(center_bottom - offset)
-
-        if len(left_top_pts) < 2:
-            self.message_text.append("Not enough valid 3D points for volume.")
-            return
-
-        # VTK mesh construction (unchanged – proven stable)
-        points = vtk.vtkPoints()
-        cells = vtk.vtkCellArray()
-
-        lt_ids = [points.InsertNextPoint(p) for p in left_top_pts]
-        rt_ids = [points.InsertNextPoint(p) for p in right_top_pts]
-        lb_ids = [points.InsertNextPoint(p) for p in left_bottom_pts]
-        rb_ids = [points.InsertNextPoint(p) for p in right_bottom_pts]
-
-        n = len(lt_ids)
-
-        def add_quad(a, b, c, d):
-            quad = vtk.vtkQuad()
-            quad.GetPointIds().SetId(0, a)
-            quad.GetPointIds().SetId(1, b)
-            quad.GetPointIds().SetId(2, c)
-            quad.GetPointIds().SetId(3, d)
-            cells.InsertNextCell(quad)
-
-        for i in range(n-1):
-            add_quad(lt_ids[i],   lt_ids[i+1],   rt_ids[i+1],   rt_ids[i])     # top
-            add_quad(lb_ids[i],   lb_ids[i+1],   rb_ids[i+1],   rb_ids[i])     # bottom
-            add_quad(lt_ids[i],   lt_ids[i+1],   lb_ids[i+1],   lb_ids[i])     # left wall
-            add_quad(rt_ids[i],   rt_ids[i+1],   rb_ids[i+1],   rb_ids[i])     # right wall
-
-        # End caps
-        add_quad(lt_ids[0],  rt_ids[0],  rb_ids[0],  lb_ids[0])
-        add_quad(lt_ids[-1], lb_ids[-1], rb_ids[-1], rt_ids[-1])
-
-        polydata = vtk.vtkPolyData()
-        polydata.SetPoints(points)
-        polydata.SetPolys(cells)
-
-        mapper = vtk.vtkPolyDataMapper()
-        mapper.SetInputData(polydata)
-
-        actor = vtk.vtkActor()
-        actor.SetMapper(mapper)
-        actor.GetProperty().SetColor(1.0, 0.65, 0.0)      # orange
-        actor.GetProperty().SetOpacity(0.5)
-
-        self.renderer.AddActor(actor)
-
-        # Safe render
-        if hasattr(self, 'vtkWidget') and self.vtkWidget:
-            rw = self.vtkWidget.GetRenderWindow()
-            if rw: rw.Render()
-
-        self.material_3d_actors.setdefault(material_index, []).append(actor)
-        self.message_text.append(f"3D material volume created (width {width_m:.1f} m)")
-
-# ==============================================================================================================================================
+# ============================================================================================================================================================
     def _load_baseline_from_design_layer(self, material_config):
         """
         Load the reference baseline JSON for a material line.
         Uses the display name stored in material_config['ref_layer']
         (e.g. "construction", "road_surface", etc.).
+        Now safely handles ref_layer being a list (from NewMaterialLineDialog).
+        Matching is case-insensitive to fix 'Construction' vs 'construction'.
         """
-        selected_display_name = material_config.get('ref_layer', '').strip()
-        if not selected_display_name or selected_display_name in ("", "None"):
-            self.message_text.append("No reference baseline selected for this material line.")
+        ref_layer = material_config.get('ref_layer', 'construction')
+        
+        # Handle list safely
+        if isinstance(ref_layer, list):
+            if not ref_layer:
+                ref_layer = 'construction'
+            else:
+                ref_layer = ref_layer[0]  # Use first selected reference for elevation
+        
+        selected_display_name = str(ref_layer).strip()
+        
+        if not selected_display_name or selected_display_name.lower() in ("", "none"):
+            self.message_text.append("No reference baseline selected — using fallback.")
             return None, None
 
         if not hasattr(self, 'current_construction_layer_path') or not self.current_construction_layer_path:
@@ -7541,16 +7550,16 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(f"Design layer folder not found: {design_layer_path}")
             return None, None
 
-        # Find the filename that matches the display name
+        # Find the filename that matches the display name (case-insensitive)
         target_filename = None
         for baseline_file in selected_baselines:
             display_name = os.path.basename(baseline_file).replace("_baseline.json", "")
-            if display_name == selected_display_name:
+            if display_name.lower() == selected_display_name.lower():
                 target_filename = baseline_file
                 break
 
         if not target_filename:
-            self.message_text.append(f"Baseline '{selected_display_name}' not found in selected baselines.")
+            self.message_text.append(f"Baseline '{selected_display_name}' not found in selected baselines. Using fallback.")
             return None, None
 
         baseline_path = os.path.join(design_layer_path, target_filename)
@@ -7586,8 +7595,6 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             self.message_text.append(f"Error reading baseline JSON: {str(e)}")
             return None, None
-
-
 # ==============================================================================================================================================
 # NEW: Method to load and draw saved material filling, labels, and 3D
     def load_and_draw_material_filling(self, material_index):
@@ -7796,6 +7803,273 @@ class PointCloudViewer(ApplicationUI):
 
 
 
-# ====================================================================================================================================================================
-#                                                                       *** END OF APPLICAATION ***
-# ====================================================================================================================================================================      
+# ======================================================================
+
+    # NEW HELPER: Load a design baseline by display name (e.g., "Construction")
+    def _load_design_baseline(self, design_name):
+        import json
+        import os
+        if not hasattr(self, 'current_construction_layer_path') or not self.current_construction_layer_path:
+            self.message_text.append("Current construction layer path not set.")
+            return [], []
+        config_path = os.path.join(self.current_construction_layer_path, "Construction_Layer_config.txt")
+        if not os.path.exists(config_path):
+            self.message_text.append(f"Construction_Layer_config.txt not found: {config_path}")
+            return [], []
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        except Exception as e:
+            self.message_text.append(f"Failed to read Construction_Layer_config: {str(e)}")
+            return [], []
+        reference_layer_2d = config.get("reference_layer_2d")
+        if not reference_layer_2d:
+            self.message_text.append("reference_layer_2d not defined in config.")
+            return [], []
+        selected_baselines = config.get("base_lines_reference", [])
+        if not selected_baselines:
+            self.message_text.append("No baselines listed in base_lines_reference.")
+            return [], []
+        # Build absolute path to the design layer
+        worksheet_root = os.path.abspath(os.path.join(self.current_construction_layer_path, "..", ".."))
+        designs_folder = os.path.join(worksheet_root, "designs")
+        design_layer_path = os.path.join(designs_folder, reference_layer_2d)
+        if not os.path.exists(design_layer_path):
+            self.message_text.append(f"Design layer folder not found: {design_layer_path}")
+            return [], []
+        # Find the filename that matches the display name (case-insensitive)
+        target_filename = None
+        for baseline_file in selected_baselines:
+            display_name = os.path.basename(baseline_file).replace("_baseline.json", "")
+            if display_name.lower() == design_name.lower():
+                target_filename = baseline_file
+                break
+        if not target_filename:
+            self.message_text.append(f"Baseline '{design_name}' not found in selected baselines.")
+            return [], []
+        baseline_path = os.path.join(design_layer_path, target_filename)
+        if not os.path.exists(baseline_path):
+            self.message_text.append(f"Baseline file missing: {baseline_path}")
+            return [], []
+        try:
+            with open(baseline_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            # Extract points – supports both new and old baseline formats
+            all_points = []
+            if "polylines" in data and data["polylines"]:
+                for poly in data["polylines"]:
+                    if "points" in poly:
+                        all_points.extend(poly["points"])
+            elif "points" in data:
+                all_points = data["points"]
+            if len(all_points) < 2:
+                self.message_text.append(f"Baseline has insufficient points ({len(all_points)}).")
+                return [], []
+            xs = [pt.get("chainage_m", pt[0] if isinstance(pt, list) else 0) for pt in all_points]
+            ys = [pt.get("relative_elevation_m", pt[1] if isinstance(pt, list) else 0) for pt in all_points]
+            self.message_text.append(
+                f"Design baseline loaded: '{design_name}' ({len(xs)} points)"
+            )
+            return xs, ys
+        except Exception as e:
+            self.message_text.append(f"Error reading baseline JSON: {str(e)}")
+            return [], []
+
+    # NEW HELPER: Load a previous material's top as baseline (from its JSON)
+    def _load_material_top_as_baseline(self, mat_name):
+        import json
+        import os
+        import numpy as np
+        mat_filename = mat_name.lower().strip() + ".json"
+        json_path = os.path.join(self.current_construction_layer_path, mat_filename)
+        if not os.path.exists(json_path):
+            # Try removing 'm' prefix if present
+            if mat_name.lower().startswith("m"):
+                mat_filename = mat_name.lower()[1:] + ".json"  # e.g., "1.json"
+                json_path = os.path.join(self.current_construction_layer_path, mat_filename)
+            if not os.path.exists(json_path):
+                self.message_text.append(f"Material JSON for {mat_name} not found.")
+                return [], []
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception as e:
+            self.message_text.append(f"Error loading material JSON for {mat_name}: {str(e)}")
+            return [], []
+        all_xs = []
+        all_ys = []
+        for seg in data.get("segments", []):
+            for p in seg.get("polyline_points", []):
+                all_xs.append(p["chainage_m"])
+                all_ys.append(p["relative_elevation_m"])
+        if not all_xs:
+            self.message_text.append(f"No points found in material JSON for {mat_name}.")
+            return [], []
+        # Sort
+        sorted_idx = np.argsort(all_xs)
+        xs = np.array(all_xs)[sorted_idx]
+        ys = np.array(all_ys)[sorted_idx]
+        self.message_text.append(
+            f"Material top loaded as baseline: '{mat_name}' ({len(xs)} points)"
+        )
+        return xs.tolist(), ys.tolist()
+
+# ==============================================================================================================================================
+    def draw_material_filling(self, from_chainage_m, to_chainage_m, thickness_m,
+                            material_index, material_config, color='#FF9800', alpha=0.6, width_m=0.0,
+                            hatch_pattern=None, base_elevation=0.0):
+        """
+        Draw 2D hatching + 3D volume for the material.
+        Now computes effective bottom as max over all referenced previous layers' tops.
+        Auto-assigns different hatching per material_index.
+        All original functionality preserved.
+        """
+        import numpy as np
+        from matplotlib.patches import Polygon
+        import vtk
+        # === Auto-assign unique hatching per material ===
+        HATCH_PATTERNS = ['o', 'x', '/', '+', '-', '.', '*', '\\', 'O', '|']
+        if hatch_pattern is None:
+            hatch_pattern = HATCH_PATTERNS[material_index % len(HATCH_PATTERNS)]
+        # Initialise containers if needed
+        if not hasattr(self, 'material_fill_patches'):
+            self.material_fill_patches = {}
+        if not hasattr(self, 'material_3d_actors'):
+            self.material_3d_actors = {}
+        # Clean previous drawings for this material
+        if material_index in self.material_fill_patches:
+            for p in self.material_fill_patches[material_index]:
+                for patch in p.values():
+                    if patch in self.ax.patches:
+                        patch.remove()
+            self.material_fill_patches[material_index] = []
+        if material_index in self.material_3d_actors:
+            for actor in self.material_3d_actors[material_index]:
+                self.renderer.RemoveActor(actor)
+            self.material_3d_actors[material_index] = []
+        # Load material top line (drawn by user)
+        mat_xs, mat_ys = self._get_material_line_points_for_segment(material_index, from_chainage_m, to_chainage_m)
+        if len(mat_xs) < 2:
+            self.message_text.append("Not enough material points to draw filling.")
+            return
+        x_dense = np.array(mat_xs)
+        top_y_dense = np.array(mat_ys)
+        # === Compute effective bottom from all references ===
+        ref_layer = material_config.get('ref_layer')
+        if not isinstance(ref_layer, list):
+            ref_layer = [ref_layer] if ref_layer else []
+        all_interp_ys = []
+        for ref in ref_layer:
+            if str(ref).lower() == "construction":
+                ref_xs, ref_ys = self._load_design_baseline("Construction")
+            else:
+                ref_xs, ref_ys = self._load_material_top_as_baseline(ref)
+            if ref_xs and len(ref_xs) >= 2:
+                # Sort just in case
+                sorted_idx = np.argsort(ref_xs)
+                ref_xs = np.array(ref_xs)[sorted_idx]
+                ref_ys = np.array(ref_ys)[sorted_idx]
+                # Interp with nan outside range
+                interp_y = np.full_like(x_dense, np.nan)
+                mask = (x_dense >= ref_xs[0]) & (x_dense <= ref_xs[-1])
+                interp_y[mask] = np.interp(x_dense[mask], ref_xs, ref_ys)
+                all_interp_ys.append(interp_y)
+        if all_interp_ys:
+            bottom_y_dense = np.nanmax(all_interp_ys, axis=0)
+            bottom_y_dense = np.nan_to_num(bottom_y_dense, nan=base_elevation)
+        else:
+            bottom_y_dense = np.full_like(x_dense, base_elevation)
+        top_y_dense = np.maximum(top_y_dense, bottom_y_dense)  # ensure top >= bottom
+        # ---------- 2D Hatching ----------
+        vertices = np.vstack([
+            np.column_stack([x_dense, bottom_y_dense]),
+            np.column_stack([x_dense[::-1], top_y_dense[::-1]])
+        ])
+        bg = Polygon(vertices, closed=True, facecolor=color, alpha=0.35, edgecolor='none', zorder=2)
+        hatch = Polygon(vertices, closed=True, facecolor='none', hatch=hatch_pattern, edgecolor='black', linewidth=0.8, zorder=3)
+        self.ax.add_patch(bg)
+        self.ax.add_patch(hatch)
+        self.material_fill_patches.setdefault(material_index, []).append({'bg': bg, 'hatch': hatch})
+        self.canvas.draw_idle()
+        avg_thick_mm = np.mean(top_y_dense - bottom_y_dense) * 1000
+        self.message_text.append(f"2D filling drawn: avg thickness {avg_thick_mm:.0f} mm")
+        # ---------- 3D Volume (only if width > 0) ----------
+        if width_m <= 0.01:
+            self.message_text.append("Width ≤ 0 → no 3D volume created.")
+            return
+        # Build 3D points with proper perpendicular offset
+        delta = 0.5
+        half_width = width_m / 2.0
+        left_top_pts, right_top_pts = [], []
+        left_bottom_pts, right_bottom_pts = [], []
+        for i in range(len(x_dense)):
+            ch = x_dense[i]
+            X, Y, base_Z = self.get_real_coordinates_from_chainage(ch)
+            if X is None:
+                X, Y, base_Z = self.interpolate_xyz(ch)
+            # Tangent approximation
+            X1, Y1, _ = self.get_real_coordinates_from_chainage(max(0, ch - delta))
+            X2, Y2, _ = self.get_real_coordinates_from_chainage(min(self.total_distance, ch + delta))
+            if X1 is None: X1, Y1, _ = self.interpolate_xyz(max(0, ch - delta))
+            if X2 is None: X2, Y2, _ = self.interpolate_xyz(min(self.total_distance, ch + delta))
+            dir_vec = np.array([X2 - X1, Y2 - Y1])
+            len_dir = np.linalg.norm(dir_vec)
+            if len_dir < 1e-6:
+                continue
+            dir_norm = dir_vec / len_dir
+            perp_norm_2d = np.array([-dir_norm[1], dir_norm[0]])
+            offset = np.array([perp_norm_2d[0], perp_norm_2d[1], 0.0]) * half_width
+            top_z = base_Z + top_y_dense[i]
+            bottom_z = base_Z + bottom_y_dense[i]
+            center_top = np.array([X, Y, top_z])
+            center_bottom = np.array([X, Y, bottom_z])
+            left_top_pts.append(center_top + offset)
+            right_top_pts.append(center_top - offset)
+            left_bottom_pts.append(center_bottom + offset)
+            right_bottom_pts.append(center_bottom - offset)
+        if len(left_top_pts) < 2:
+            self.message_text.append("Not enough valid 3D points for volume.")
+            return
+        # VTK mesh construction (unchanged – proven stable)
+        points = vtk.vtkPoints()
+        cells = vtk.vtkCellArray()
+        lt_ids = [points.InsertNextPoint(p) for p in left_top_pts]
+        rt_ids = [points.InsertNextPoint(p) for p in right_top_pts]
+        lb_ids = [points.InsertNextPoint(p) for p in left_bottom_pts]
+        rb_ids = [points.InsertNextPoint(p) for p in right_bottom_pts]
+        n = len(lt_ids)
+        def add_quad(a, b, c, d):
+            quad = vtk.vtkQuad()
+            quad.GetPointIds().SetId(0, a)
+            quad.GetPointIds().SetId(1, b)
+            quad.GetPointIds().SetId(2, c)
+            quad.GetPointIds().SetId(3, d)
+            cells.InsertNextCell(quad)
+        for i in range(n-1):
+            add_quad(lt_ids[i], lt_ids[i+1], rt_ids[i+1], rt_ids[i]) # top
+            add_quad(lb_ids[i], lb_ids[i+1], rb_ids[i+1], rb_ids[i]) # bottom
+            add_quad(lt_ids[i], lt_ids[i+1], lb_ids[i+1], lb_ids[i]) # left wall
+            add_quad(rt_ids[i], rt_ids[i+1], rb_ids[i+1], rb_ids[i]) # right wall
+        # End caps
+        add_quad(lt_ids[0], rt_ids[0], rb_ids[0], lb_ids[0])
+        add_quad(lt_ids[-1], lb_ids[-1], rb_ids[-1], rt_ids[-1])
+        polydata = vtk.vtkPolyData()
+        polydata.SetPoints(points)
+        polydata.SetPolys(cells)
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputData(polydata)
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        actor.GetProperty().SetColor(1.0, 0.65, 0.0) # orange
+        actor.GetProperty().SetOpacity(0.5)
+        self.renderer.AddActor(actor)
+        # Safe render
+        if hasattr(self, 'vtkWidget') and self.vtkWidget:
+            rw = self.vtkWidget.GetRenderWindow()
+            if rw: rw.Render()
+        self.material_3d_actors.setdefault(material_index, []).append(actor)
+        self.message_text.append(f"3D material volume created (width {width_m:.1f} m)")
+
+# # ====================================================================================================================================================================
+# #                                                                       *** END OF APPLICAATION ***
+# # ====================================================================================================================================================================      
