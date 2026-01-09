@@ -1683,6 +1683,19 @@ class PointCloudViewer(ApplicationUI):
             loaded_baselines = self.load_all_baselines_from_layer(full_layer_path)
             design_points_loaded = self.load_json_files_to_3d_pointcloud(full_layer_path)
 
+            # === POPULATE SELF.LINE_TYPES FROM LOADED BASELINES ===
+            for ltype, data in loaded_baselines.items():
+                polylines_2d = []
+                for poly in data.get("polylines", []):
+                    poly_2d = [(pt["chainage_m"], pt["relative_elevation_m"]) for pt in poly.get("points", []) if "chainage_m" in pt and "relative_elevation_m" in pt]
+                    if len(poly_2d) >= 2:
+                        polylines_2d.append(poly_2d)
+                self.line_types[ltype] = {
+                    'color': data.get("color", "black"),
+                    'polylines': polylines_2d,
+                    'artists': []
+                }
+
             # === RECREATE CURVE LABELS FROM SAVED ANGLES ===
             self.clear_curve_labels()
             recreated_curve_count = 0
@@ -1767,6 +1780,28 @@ class PointCloudViewer(ApplicationUI):
                 loaded_baselines = self.load_all_baselines_from_layer(design_layer_path)
                 design_points_loaded = self.load_json_files_to_3d_pointcloud(design_layer_path)
                 self.message_text.append(f"Loaded {len(loaded_baselines)} baselines for 3D planes from design layer")
+
+                # === RECREATE CURVE LABELS FROM SAVED ANGLES FOR CURVED PLANES ===
+                self.clear_curve_labels()
+                recreated_curve_count = 0
+                for ltype, baseline_data in loaded_baselines.items():
+                    for poly in baseline_data.get("polylines", []):
+                        for pt in poly.get("points", []):
+                            if "angle_deg" in pt:
+                                chainage = pt["chainage_m"]
+                                config_dict = {
+                                    'angle': pt["angle_deg"],
+                                    'inner_curve': pt.get("inner_curve", False),
+                                    'outer_curve': pt.get("outer_curve", False)
+                                }
+                                self.curve_labels.append({'chainage': chainage, 'config': config_dict})
+                                self.add_curve_label_at_x(chainage, config_dict)
+                                recreated_curve_count += 1
+
+                if recreated_curve_count > 0:
+                    self.message_text.append(f"Recreated {recreated_curve_count} curve label(s) from design layer → curved road ready!")
+                else:
+                    self.message_text.append("No curve angles found in design layer → straight road.")
 
             if design_layer_path and os.path.exists(design_layer_path):
                 zero_loaded = self.load_zero_line_from_layer(design_layer_path)
@@ -2166,8 +2201,7 @@ class PointCloudViewer(ApplicationUI):
                 self.message_text.append(f"Error loading {filename}: {str(e)}")
 
         return loaded
-
-# ============================================================================================================================================================
+    # ============================================================================================================================================================
     def redraw_baseline_on_graph(self, ltype, style="solid"):
         """Redraw a loaded baseline on the 2D matplotlib graph.
         Supports 'solid' or 'dotted' style.
@@ -2392,33 +2426,42 @@ class PointCloudViewer(ApplicationUI):
 
 # ===========================================================================================================================================================
     def map_baselines_to_3d_planes_from_data(self, loaded_baselines):
-        """Generate 3D planes from loaded baseline data — NOW WITH REAL CURVES using self.curve_labels"""
+        """Load saved JSON → regenerate SMOOTH CURVED 3D planes for ALL baselines → restore saved widths"""
         if not self.zero_line_set:
-            self.message_text.append("Zero line not set - cannot generate 3D planes.")
+            self.message_text.append("Zero line not set - cannot reload baselines.")
             return
 
         import numpy as np
         import vtk
 
-        self.clear_baseline_planes()
+        # DO NOT CLEAR HERE - allow appending when called multiple times for each baseline
+        # self.clear_baseline_planes()  # Removed to prevent clearing previous planes
 
-        planes_generated = 0
-        width_summary = []
-
-        # Build curve lookup for fast access: chainage -> angle + direction
+        # Build curve lookup
         curve_lookup = {}
         for item in self.curve_labels:
             ch = item['chainage']
             cfg = item['config']
             curve_lookup[ch] = {
                 'angle': cfg['angle'],
-                'left_turn': cfg['inner_curve']  # inner = left turn
+                'left_turn': cfg['inner_curve']
             }
+
+        planes_generated = 0
+        width_summary = []
+
+        # Initial direction from zero line
+        zero_dir = np.array(self.zero_end_point) - np.array(self.zero_start_point)
+        dir_len = np.linalg.norm(zero_dir)
+        if dir_len > 1e-6:
+            initial_dir = zero_dir / dir_len
+        else:
+            initial_dir = np.array([1.0, 0.0, 0.0])
 
         for ltype, baseline_data in loaded_baselines.items():
             width_m = baseline_data.get("width_meters")
             if width_m is None or width_m <= 0:
-                self.message_text.append(f"Invalid width for {ltype}. Skipping.")
+                self.message_text.append(f"Skipped {ltype}: Invalid width_meters ({width_m}).")
                 continue
 
             self.baseline_widths[ltype] = float(width_m)
@@ -2429,111 +2472,137 @@ class PointCloudViewer(ApplicationUI):
             color_rgb = rgba[:3]
             opacity = rgba[3]
 
-            # Start from zero line start
+            # Reset for this baseline
             current_pos = np.array(self.zero_start_point)
-            current_dir = (self.zero_end_point - self.zero_start_point)
-            dir_len = np.linalg.norm(current_dir)
-            if dir_len > 0:
-                current_dir /= dir_len
+            current_dir = initial_dir.copy()
 
-            left_points = []
-            right_points = []
+            left_points_all = []
+            right_points_all = []
 
             for poly in baseline_data.get("polylines", []):
                 points = poly.get("points", [])
                 if len(points) < 2:
                     continue
 
-                # Dense sampling for smooth curve
                 for i in range(len(points) - 1):
                     pt1 = points[i]
                     pt2 = points[i + 1]
 
-                    ch1 = pt1["chainage_m"]
-                    ch2 = pt2["chainage_m"]
-                    z1 = pt1["world_coordinates"][2] - self.zero_start_z  # relative Z
+                    ch1 = pt1.get("chainage_m")
+                    ch2 = pt2.get("chainage_m")
+                    if ch1 is None or ch2 is None or ch2 <= ch1:
+                        continue
+
+                    z1 = pt1["world_coordinates"][2] - self.zero_start_z
                     z2 = pt2["world_coordinates"][2] - self.zero_start_z
 
-                    # Apply turn at start of segment if exists
+                    # Apply turn at start of segment
                     if ch1 in curve_lookup:
-                        angle = curve_lookup[ch1]['angle']
+                        angle_deg = curve_lookup[ch1]['angle']
                         left_turn = curve_lookup[ch1]['left_turn']
-                        rad = np.deg2rad(angle)
+                        rad = np.deg2rad(angle_deg)
                         sin_val = np.sin(rad) if left_turn else -np.sin(rad)
                         cos_val = np.cos(rad)
-                        rot = np.array([[cos_val, -sin_val, 0],
-                                        [sin_val, cos_val, 0],
-                                        [0, 0, 1]])
-                        current_dir = rot @ current_dir
-                        current_dir /= np.linalg.norm(current_dir)
+                        rot_matrix = np.array([
+                            [cos_val, -sin_val, 0],
+                            [sin_val,  cos_val, 0],
+                            [0,        0,       1]
+                        ])
+                        current_dir = rot_matrix @ current_dir
+                        current_dir /= np.linalg.norm(current_dir)  # safe normalize
 
-                    # Sample segment
-                    samples = max(10, int((ch2 - ch1) / 0.5) + 1)
+                    # Dense sampling
+                    segment_length = ch2 - ch1
+                    samples = max(10, int(segment_length / 0.5) + 1)
+
                     for s in range(samples):
-                        t = s / (samples - 1) if samples > 1 else 0
-                        ch = ch1 + t * (ch2 - ch1)
+                        t = s / (samples - 1) if samples > 1 else 0.0
                         rel_z = z1 + t * (z2 - z1)
                         abs_z = self.zero_start_z + rel_z
 
-                        # Advance position
-                        if s > 0:
-                            step = (ch2 - ch1) / (samples - 1)
-                            current_pos += current_dir * step
+                        # Advance position only after first sample
+                        if s == 0:
+                            # For s=0, use exact start position (no advance yet)
+                            center_pos = current_pos.copy()
+                        else:
+                            step_dist = segment_length / (samples - 1)
+                            current_pos += current_dir * step_dist
+                            center_pos = current_pos.copy()
 
-                        center = np.array([current_pos[0], current_pos[1], abs_z])
+                        center = np.array([center_pos[0], center_pos[1], abs_z])
 
-                        # Perpendicular
-                        perp = np.array([-current_dir[1], current_dir[0], 0.0])
-                        if np.linalg.norm(perp) > 0:
+                        # Perpendicular: cross with up vector for reliability
+                        up = np.array([0.0, 0.0, 1.0])
+                        perp = np.cross(current_dir, up)
+                        perp_norm = np.linalg.norm(perp)
+                        if perp_norm < 1e-6:
+                            # Fallback if direction is vertical (unlikely)
+                            perp = np.array([ -current_dir[1], current_dir[0], 0.0 ])
                             perp /= np.linalg.norm(perp)
 
-                        left = center + perp * half_width
-                        right = center - perp * half_width
+                        # Consistent left/right sides: check against initial direction
+                        initial_perp = np.cross(initial_dir, up)
+                        if np.dot(perp, initial_perp) < 0:
+                            perp = -perp
 
-                        left_points.append(left)
-                        right_points.append(right)
+                        left_pt = center + perp * half_width
+                        right_pt = center - perp * half_width
 
-            # Create smooth continuous surface
-            if len(left_points) >= 2:
-                points = vtk.vtkPoints()
-                cells = vtk.vtkCellArray()
-                for i in range(len(left_points)):
-                    points.InsertNextPoint(left_points[i])
-                    points.InsertNextPoint(right_points[i])
-                for i in range(len(left_points) - 1):
-                    quad = vtk.vtkQuad()
-                    quad.GetPointIds().SetId(0, 2*i)
-                    quad.GetPointIds().SetId(1, 2*i + 1)
-                    quad.GetPointIds().SetId(2, 2*(i+1) + 1)
-                    quad.GetPointIds().SetId(3, 2*(i+1))
-                    cells.InsertNextCell(quad)
+                        left_points_all.append(left_pt.tolist())
+                        right_points_all.append(right_pt.tolist())
 
-                polydata = vtk.vtkPolyData()
-                polydata.SetPoints(points)
-                polydata.SetPolys(cells)
+            # Create actor if enough points
+            num_strips = len(left_points_all)
+            if num_strips < 2:
+                self.message_text.append(f"No plane for {ltype}: only {num_strips} strips generated.")
+                continue
 
-                mapper = vtk.vtkPolyDataMapper()
-                mapper.SetInputData(polydata)
+            points = vtk.vtkPoints()
+            cells = vtk.vtkCellArray()
 
-                actor = vtk.vtkActor()
-                actor.SetMapper(mapper)
-                actor.GetProperty().SetColor(*color_rgb)
-                actor.GetProperty().SetOpacity(opacity)
+            for i in range(num_strips):
+                points.InsertNextPoint(left_points_all[i])
+                points.InsertNextPoint(right_points_all[i])
 
-                self.renderer.AddActor(actor)
-                self.baseline_plane_actors.append(actor)
-                planes_generated += 1
+            for i in range(num_strips - 1):
+                quad = vtk.vtkQuad()
+                quad.GetPointIds().SetId(0, 2 * i)       # left i
+                quad.GetPointIds().SetId(1, 2 * i + 1)   # right i
+                quad.GetPointIds().SetId(2, 2 * (i + 1) + 1)  # right i+1
+                quad.GetPointIds().SetId(3, 2 * (i + 1))      # left i+1
+                cells.InsertNextCell(quad)
 
-        # Render
+            polydata = vtk.vtkPolyData()
+            polydata.SetPoints(points)
+            polydata.SetPolys(cells)
+
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputData(polydata)
+
+            actor = vtk.vtkActor()
+            actor.SetMapper(mapper)
+            actor.GetProperty().SetColor(*color_rgb)
+            actor.GetProperty().SetOpacity(opacity)
+            actor.GetProperty().EdgeVisibilityOn()
+            actor.GetProperty().SetEdgeColor(*color_rgb)
+            actor.GetProperty().SetLineWidth(1.5)
+
+            self.renderer.AddActor(actor)
+            self.baseline_plane_actors.append(actor)
+            planes_generated += 1
+            self.message_text.append(f"Generated 3D plane for '{ltype}' → width {width_m:.2f} m")
+
+        # Render once at the end
         rw = (self.vtk_widget if hasattr(self, 'vtk_widget') else self.vtkWidget).GetRenderWindow()
         rw.Render()
 
         if planes_generated > 0:
+            self.message_text.append(f"Total 3D planes generated: {planes_generated}")
             width_list = "\n".join(width_summary)
-            self.message_text.append(f"Generated {planes_generated} smooth curved 3D plane(s)")
-            self.message_text.append(f"Widths: {width_list}")
+            self.message_text.append(f"Widths loaded:\n{width_list}")
         else:
-            self.message_text.append("No 3D planes generated.")
+            self.message_text.append("No 3D planes were generated.")
+
 # =======================================================================================================================================================
     def save_baseline_with_curves(self, ltype, json_path):
         """
@@ -2617,63 +2686,10 @@ class PointCloudViewer(ApplicationUI):
     # =========================================================================================================================================================
     # NEW: Load baseline and recreate curve labels if present
     # =========================================================================================================================================================
-    # def load_baseline_with_curves(self, json_path, ltype):
-    #     """
-    #     Loads a single baseline JSON file.
-    #     If 'curves' field exists → recreates yellow curve labels on 2D graph.
-    #     Always restores saved width and polylines.
-    #     """
-    #     if not os.path.exists(json_path):
-    #         return False
-
-    #     try:
-    #         with open(json_path, 'r', encoding='utf-8') as f:
-    #             data = json.load(f)
-    #     except Exception as e:
-    #         self.message_text.append(f"Error reading {os.path.basename(json_path)}: {str(e)}")
-    #         return False
-
-    #     # Restore width
-    #     width = data.get("width_meters")
-    #     if width is not None and width > 0:
-    #         self.baseline_widths[ltype] = float(width)
-
-    #     # Restore polylines (for 2D redraw and 3D mapping)
-    #     polylines_2d = []
-    #     for poly in data.get("polylines", []):
-    #         poly_2d = []
-    #         for pt in poly.get("points", []):
-    #             dist = pt.get("chainage_m", 0.0)
-    #             rel_z = pt.get("relative_elevation_m", 0.0)
-    #             poly_2d.append((dist, rel_z))
-    #         if len(poly_2d) >= 2:
-    #             polylines_2d.append(poly_2d)
-    #     self.line_types[ltype]['polylines'] = polylines_2d
-
-    #     # === RECREATE CURVE LABELS IF SAVED ===
-    #     self.clear_curve_labels()  # Clear any old ones first (safe)
-    #     if "curves" in data:
-    #         for curve in data["curves"]:
-    #             config = {
-    #                 'angle': curve.get("angle_deg", 5.0),
-    #                 'inner_curve': curve.get("inner_curve", False),
-    #                 'outer_curve': curve.get("outer_curve", False)
-    #             }
-    #             chainage = curve.get("chainage_m", 0.0)
-    #             self.add_curve_label_at_x(chainage, config)
-
-    #         self.message_text.append(f"Recreated {len(data['curves'])} curve label(s) from {os.path.basename(json_path)}")
-    #     else:
-    #         self.message_text.append(f"Loaded straight baseline: {os.path.basename(json_path)}")
-
-    #     return True
-
-
     def load_baseline_with_curves(self, json_path, ltype):
         """
         Loads a single baseline JSON file.
-        - If 'curves' field exists → recreates yellow curve labels on 2D graph.
-        - If no 'curves' → scans points for embedded 'angle_deg' and recreates labels from those.
+        If 'curves' field exists → recreates yellow curve labels on 2D graph.
         Always restores saved width and polylines.
         """
         if not os.path.exists(json_path):
@@ -2703,9 +2719,8 @@ class PointCloudViewer(ApplicationUI):
                 polylines_2d.append(poly_2d)
         self.line_types[ltype]['polylines'] = polylines_2d
 
-        recreated = False
-
-        # First, check for separate "curves" list (older format)
+        # === RECREATE CURVE LABELS IF SAVED ===
+        self.clear_curve_labels()  # Clear any old ones first (safe)
         if "curves" in data:
             for curve in data["curves"]:
                 config = {
@@ -2715,35 +2730,13 @@ class PointCloudViewer(ApplicationUI):
                 }
                 chainage = curve.get("chainage_m", 0.0)
                 self.add_curve_label_at_x(chainage, config)
-            self.message_text.append(f"Recreated {len(data['curves'])} curve label(s) from separate 'curves' in {os.path.basename(json_path)}")
-            recreated = True
 
-        # If no "curves", scan points for embedded angles (your JSON format)
+            self.message_text.append(f"Recreated {len(data['curves'])} curve label(s) from {os.path.basename(json_path)}")
         else:
-            recreated_count = 0
-            for poly in data.get("polylines", []):
-                for pt in poly.get("points", []):
-                    if "angle_deg" in pt:
-                        chainage = pt.get("chainage_m", 0.0)
-                        config = {
-                            'angle': pt["angle_deg"],
-                            'inner_curve': pt.get("inner_curve", False),
-                            'outer_curve': pt.get("outer_curve", False)
-                        }
-                        # Add to curve_labels list (global)
-                        self.curve_labels.append({'chainage': chainage, 'config': config})
-                        # Recreate yellow label on 2D graph
-                        self.add_curve_label_at_x(chainage, config)
-                        recreated_count += 1
-
-            if recreated_count > 0:
-                self.message_text.append(f"Recreated {recreated_count} curve label(s) from embedded point angles in {os.path.basename(json_path)}")
-                recreated = True
-
-        if not recreated:
-            self.message_text.append(f"Loaded straight baseline: {os.path.basename(json_path)} (no curves found)")
+            self.message_text.append(f"Loaded straight baseline: {os.path.basename(json_path)}")
 
         return True
+
 
 # =========================================================================================================================================================== 
     def clear_all_baselines(self):
@@ -8375,9 +8368,7 @@ class PointCloudViewer(ApplicationUI):
         self.material_3d_actors[material_index].append(actor)
 
 
-
 # ======================================================================
-
     # NEW HELPER: Load a design baseline by display name (e.g., "Construction")
     def _load_design_baseline(self, design_name):
         import json
@@ -8448,6 +8439,7 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(f"Error reading baseline JSON: {str(e)}")
             return [], []
 
+# ==============================================================================================================================================
     # NEW HELPER: Load a previous material's top as baseline (from its JSON)
     def _load_material_top_as_baseline(self, mat_name):
         import json
@@ -8674,11 +8666,7 @@ class PointCloudViewer(ApplicationUI):
         # === Restore polylines (for 2D drawing and 3D mapping) ===
         polylines_2d = []
         for poly in data.get("polylines", []):
-            poly_2d = []
-            for pt in poly.get("points", []):
-                chainage = pt.get("chainage_m", 0.0)
-                rel_elev = pt.get("relative_elevation_m", 0.0)
-                poly_2d.append((chainage, rel_elev))
+            poly_2d = [(pt.get("chainage_m", 0.0), pt.get("relative_elevation_m", 0.0)) for pt in poly.get("points", [])]
             if len(poly_2d) >= 2:
                 polylines_2d.append(poly_2d)
         self.line_types[ltype]['polylines'] = polylines_2d
