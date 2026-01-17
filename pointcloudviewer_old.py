@@ -1,3 +1,5 @@
+##  Curve BaseLine Code ##
+
 # main.py
 import os
 import numpy as np
@@ -54,7 +56,7 @@ class PointCloudViewer(ApplicationUI):
         self.current_curve_text = ""        # Stores the text like "5.0° - I"
 
         self.curved_alignment = None  # Cache for curved path: list of (ch, pos_3d, dir_3d)
-        
+
         self.road_plane_actors = []      # Stores the two side planes (left + right)
         self.road_plane_center_actor = None   # Optional: centre line for reference
 
@@ -117,6 +119,17 @@ class PointCloudViewer(ApplicationUI):
         # Ensure canvas can receive key events
         self.canvas.setFocusPolicy(Qt.StrongFocus)
         self.canvas.setFocus()  # Optional: give focus automatically
+
+
+        # # Per-baseline width storage - ONLY stores user-confirmed widths
+        # self.baseline_widths = {
+        #     'surface': 0.0,
+        #     'construction': 0.0,
+        #     'road_surface': 0.0,
+        #     'deck_line': 0.0,
+        #     'projection_line': 0.0,
+        #     'material': 0.0,
+        # }
 
         # === MATERIAL LINE DRAWING STATE (NEW WORKFLOW) ===
         self.material_drawing_active = False                    # True only when Start is pressed
@@ -1799,7 +1812,7 @@ class PointCloudViewer(ApplicationUI):
         # Generate 3D planes
         # ===============================================================
         if self.zero_line_set and loaded_baselines:
-            #self.clear_baseline_planes()
+            self.clear_baseline_planes()
             planes_generated = 0
             width_summary = []
             for ltype, baseline_data in loaded_baselines.items():
@@ -2017,6 +2030,7 @@ class PointCloudViewer(ApplicationUI):
             self.vtk_widget.GetRenderWindow().Render()
 
         return loaded_any
+    
 # ==========================================================================================================================================================
 
     def clear_reference_lines(self):
@@ -2039,7 +2053,6 @@ class PointCloudViewer(ApplicationUI):
                     renderer.RemoveActor(actor)
             self.vtk_widget.GetRenderWindow().Render()
 
-    
 # ===========================================================================================================================================================
 
     def load_zero_line_from_layer(self, layer_path):
@@ -2102,10 +2115,8 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             self.message_text.append(f"Error loading zero_line_config.json: {str(e)}")
             return False
-
-
+        
 # ===========================================================================================================================================================
-
     def load_all_baselines_from_layer(self, layer_path):
         """Load all *_baseline.json files from the given layer folder.
         Returns dict of loaded data.
@@ -2184,7 +2195,6 @@ class PointCloudViewer(ApplicationUI):
         self.canvas.draw_idle()
 
 # ===========================================================================================================================================================
-
     # New method to load baselines from JSON files
     def load_baselines_from_layer(self):
         if not self.current_layer_name:
@@ -2392,7 +2402,7 @@ class PointCloudViewer(ApplicationUI):
         import numpy as np
         import vtk
 
-        #self.clear_baseline_planes()
+        self.clear_baseline_planes()
 
         planes_generated = 0
         width_summary = []
@@ -2526,8 +2536,7 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(f"Widths: {width_list}")
         else:
             self.message_text.append("No 3D planes generated.")
-
-# ==========================================================================================================================================================
+# =======================================================================================================================================================
     def save_baseline_with_curves(self, ltype, json_path):
         """
         Saves a single baseline to JSON, including curve angles only if curve labels exist.
@@ -2605,8 +2614,63 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             self.message_text.append(f"Failed to save {os.path.basename(json_path)}: {str(e)}")
             return False
-        
-# ===========================================================================================================================================================
+
+
+    # =========================================================================================================================================================
+    # NEW: Load baseline and recreate curve labels if present
+    # =========================================================================================================================================================
+    # def load_baseline_with_curves(self, json_path, ltype):
+    #     """
+    #     Loads a single baseline JSON file.
+    #     If 'curves' field exists → recreates yellow curve labels on 2D graph.
+    #     Always restores saved width and polylines.
+    #     """
+    #     if not os.path.exists(json_path):
+    #         return False
+
+    #     try:
+    #         with open(json_path, 'r', encoding='utf-8') as f:
+    #             data = json.load(f)
+    #     except Exception as e:
+    #         self.message_text.append(f"Error reading {os.path.basename(json_path)}: {str(e)}")
+    #         return False
+
+    #     # Restore width
+    #     width = data.get("width_meters")
+    #     if width is not None and width > 0:
+    #         self.baseline_widths[ltype] = float(width)
+
+    #     # Restore polylines (for 2D redraw and 3D mapping)
+    #     polylines_2d = []
+    #     for poly in data.get("polylines", []):
+    #         poly_2d = []
+    #         for pt in poly.get("points", []):
+    #             dist = pt.get("chainage_m", 0.0)
+    #             rel_z = pt.get("relative_elevation_m", 0.0)
+    #             poly_2d.append((dist, rel_z))
+    #         if len(poly_2d) >= 2:
+    #             polylines_2d.append(poly_2d)
+    #     self.line_types[ltype]['polylines'] = polylines_2d
+
+    #     # === RECREATE CURVE LABELS IF SAVED ===
+    #     self.clear_curve_labels()  # Clear any old ones first (safe)
+    #     if "curves" in data:
+    #         for curve in data["curves"]:
+    #             config = {
+    #                 'angle': curve.get("angle_deg", 5.0),
+    #                 'inner_curve': curve.get("inner_curve", False),
+    #                 'outer_curve': curve.get("outer_curve", False)
+    #             }
+    #             chainage = curve.get("chainage_m", 0.0)
+    #             self.add_curve_label_at_x(chainage, config)
+
+    #         self.message_text.append(f"Recreated {len(data['curves'])} curve label(s) from {os.path.basename(json_path)}")
+    #     else:
+    #         self.message_text.append(f"Loaded straight baseline: {os.path.basename(json_path)}")
+
+    #     return True
+
+
     def load_baseline_with_curves(self, json_path, ltype):
         """
         Loads a single baseline JSON file.
@@ -2682,6 +2746,21 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(f"Loaded straight baseline: {os.path.basename(json_path)} (no curves found)")
 
         return True
+
+# =========================================================================================================================================================== 
+    def clear_all_baselines(self):
+        """Clear polylines, widths, and curve labels before loading new layer."""
+        self.clear_curve_labels()
+        self.baseline_widths = {}
+        for ltype in self.baseline_types:
+            self.line_types[ltype]['polylines'] = []
+            # Also clear 2D artists if you have them
+            for artist in self.line_types[ltype].get('artists', []):
+                try:
+                    artist.remove()
+                except:
+                    pass
+            self.line_types[ltype]['artists'] = []
 # ===========================================================================================================================================================
     def show_graph_section(self, category):
         """
@@ -3719,6 +3798,7 @@ class PointCloudViewer(ApplicationUI):
         self.canvas.draw_idle()
 
 # ==============================================================================================================================================================
+
     def add_curve_label_at_x(self, x, config=None):
         """
         Add a curve label at position x.
@@ -3772,6 +3852,44 @@ class PointCloudViewer(ApplicationUI):
                     break
 
         self.curve_pick_id = self.canvas.mpl_connect('pick_event', on_pick)
+
+# ==========================================================================================================================================================
+    # Update edit_individual_curve_label to handle chainage (though not needed for edit)
+    def edit_individual_curve_label(self, label_artist, current_config, chainage):
+        """Open dialog to edit ONE specific curve label"""
+        dialog = CurveDialog(self)
+
+        # Pre-fill with current values
+        dialog.angle_edit.setText(f"{current_config['angle']:.1f}")
+        dialog.outer_checkbox.setChecked(current_config['outer_curve'])
+        dialog.inner_checkbox.setChecked(current_config['inner_curve'])
+
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        new_config = dialog.get_configuration()
+        new_angle = new_config['angle']
+        if new_angle <= 0:
+            QMessageBox.warning(self, "Invalid Angle", "Angle must be > 0.")
+            return
+
+        # Format new display text
+        outer = new_config['outer_curve']
+        inner = new_config['inner_curve']
+        curve_type = "O&I" if outer and inner else ("O" if outer else ("I" if inner else ""))
+        new_text = f"{new_angle:.1f}° - {curve_type}" if curve_type else f"{new_angle:.1f}°"
+
+        # Update only this label's text
+        label_artist.set_text(new_text)
+
+        # Update stored config for this label
+        for item in self.curve_labels:
+            if item['artist'] == label_artist:
+                item['config'] = new_config
+                break
+
+        self.message_text.append(f"Updated curve label to: {new_text} at chainage {chainage:.2f}")
+        self.canvas.draw_idle()
 
 # ===========================================================================================================================================================
     # New: Build curved alignment based on curve labels
@@ -3872,43 +3990,6 @@ class PointCloudViewer(ApplicationUI):
 
         return alignment
     
-# ===========================================================================================================================================================
-    def edit_individual_curve_label(self, label_artist, current_config, chainage):
-        """Open dialog to edit ONE specific curve label"""
-        dialog = CurveDialog(self)
-
-        # Pre-fill with current values
-        dialog.angle_edit.setText(f"{current_config['angle']:.1f}")
-        dialog.outer_checkbox.setChecked(current_config['outer_curve'])
-        dialog.inner_checkbox.setChecked(current_config['inner_curve'])
-
-        if dialog.exec_() != QDialog.Accepted:
-            return
-
-        new_config = dialog.get_configuration()
-        new_angle = new_config['angle']
-        if new_angle <= 0:
-            QMessageBox.warning(self, "Invalid Angle", "Angle must be > 0.")
-            return
-
-        # Format new display text
-        outer = new_config['outer_curve']
-        inner = new_config['inner_curve']
-        curve_type = "O&I" if outer and inner else ("O" if outer else ("I" if inner else ""))
-        new_text = f"{new_angle:.1f}° - {curve_type}" if curve_type else f"{new_angle:.1f}°"
-
-        # Update only this label's text
-        label_artist.set_text(new_text)
-
-        # Update stored config for this label
-        for item in self.curve_labels:
-            if item['artist'] == label_artist:
-                item['config'] = new_config
-                break
-
-        self.message_text.append(f"Updated curve label to: {new_text} at chainage {chainage:.2f}")
-        self.canvas.draw_idle()
-
 # ===========================================================================================================================================================
     def edit_current_curve(self):
         """Edit curve angle/type – updates all existing labels"""
@@ -6329,6 +6410,7 @@ class PointCloudViewer(ApplicationUI):
         actor.GetProperty().SetColor(color)
         actor.GetProperty().SetOpacity(opacity)
         return actor
+    
     # ===========================================================================================================================================================
     def clear_baseline_planes(self):
         """Clear all baseline plane actors from the 3D view"""
@@ -6417,7 +6499,6 @@ class PointCloudViewer(ApplicationUI):
             QMessageBox.warning(self, "Load Failed", f"Could not load point cloud:\n{file_path}\n\nError: {str(e)}")
             return False
         
-
 # ===========================================================================================================================================================
     def focus_camera_on_full_cloud(self):
         """Focus camera on the entire point cloud"""
@@ -6547,6 +6628,7 @@ class PointCloudViewer(ApplicationUI):
         self.slider_marker_actor.SetPosition(world_pos[0], world_pos[1], world_pos[2])
         self.vtk_widget.GetRenderWindow().Render()
 
+# ===========================================================================================================================================================
     def remove_slider_marker(self):
         """Remove the slider position sphere from the scene"""
         if self.slider_marker_actor is not None:
@@ -6738,7 +6820,7 @@ class PointCloudViewer(ApplicationUI):
         return chainage_str
 
 # =======================================================================================================================================
-# MATERIAL LINE HANDLING
+    # MATERIAL LINE HANDLING
     def toggle_material_line_visibility(self, index, state):
         """Activate/deactivate a material line — drawing requires 'Start' button"""
         if 0 <= index < len(self.material_items):
@@ -6850,9 +6932,8 @@ class PointCloudViewer(ApplicationUI):
 
             # Always redraw 2D canvas
             self.canvas.draw_idle()
-    # =====================================================================
+# =====================================================================
     # NEW: Handle ESC key to finish material line drawing
-    # =====================================================================
     def on_material_key_press(self, event):
         """Handle ESC key to finish material drawing"""
         if event.key == 'escape' and self.active_line_type == 'material':
@@ -7037,78 +7118,52 @@ class PointCloudViewer(ApplicationUI):
 
             from_m = config.get('from_chainage_m')
             to_m   = config.get('to_chainage_m')
-            thickness_m = config.get('material_thickness_m', 0.0)
+            thickness_m = config.get('material_thickness_m', 0.0)   # Retained for JSON, not used for filling height
 
             if from_m is None or to_m is None or to_m <= from_m:
                 QMessageBox.warning(self, "Invalid Input", "From chainage must be less than To chainage.")
                 return
 
+            # Optional warning if thickness is zero (but now it's not used for height)
             if thickness_m <= 0:
                 reply = QMessageBox.question(
                     self, "Thickness Zero",
-                    "Material thickness is 0 m – this is for documentation only.\nContinue anyway?",
+                    "Material thickness is 0 m – this is for documentation only (filling uses drawn coordinates).\n"
+                    "Continue anyway?",
                     QMessageBox.Yes | QMessageBox.No
                 )
                 if reply == QMessageBox.No:
                     return
 
-            # ===================================================
-            #   Prepare polyline_points WITH absolute coordinates
-            # ===================================================
-            polyline_points = []
-            for p in self.material_drawing_points:
-                chainage = round(p[0], 3)
-                rel_elev = round(p[1], 3)
+            # === NEW: Prepare polyline points for saving ===
+            polyline_points = [
+                {"chainage_m": round(p[0], 3), "relative_elevation_m": round(p[1], 3)}
+                for p in self.material_drawing_points
+            ]
 
-                X, Y, Z_center = self.get_real_coordinates_from_chainage(chainage)
-                if X is None or Y is None or Z_center is None:
-                    X, Y, Z_center = self.interpolate_xyz(chainage)
-
-                abs_z = Z_center + rel_elev
-
-                polyline_points.append({
-                    "chainage_m": chainage,
-                    "relative_elevation_m": rel_elev,
-                    "absolute_coordinates": [
-                        round(X, 3),
-                        round(Y, 3),
-                        round(abs_z, 3)
-                    ]
-                })
-
-            # Save
+            # === SAVE TO JSON WITH REAL 3D COORDINATES AND POLYLINE POINTS ===
             self.save_material_segment_to_json(
                 material_idx=material_idx,
                 config=config,
                 from_m=from_m,
                 to_m=to_m,
                 point_number=None,
-                polyline_points=polyline_points
+                polyline_points=polyline_points  # NEW: Pass points for saving
             )
 
-            # Show volume feedback (optional but recommended)
-            try:
-                json_path = os.path.join(self.current_construction_layer_path,
-                                    f"{self.material_configs[material_idx]['folder_name']}.json")
-                with open(json_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                last_seg = data["segments"][-1]
-                self.message_text.append(
-                    f"Segment saved → Volume: {last_seg.get('volume_m3', 0):.2f} m³   "
-                    f"Avg height: {last_seg.get('avg_height_m', 0):.3f} m"
-                )
-            except Exception as ex:
-                self.message_text.append(f"Note: Could not read saved volume info ({ex})")
-
-            # Draw permanent line
+            # === DRAW PERMANENT ORANGE POLYLINE ===
             xs = [p[0] for p in self.material_drawing_points]
             ys = [p[1] for p in self.material_drawing_points]
 
             permanent_line = self.ax.plot(
                 xs, ys,
-                color='orange', linewidth=3, linestyle='-',
-                marker='o', markersize=6,
-                markerfacecolor='orange', markeredgecolor='darkred',
+                color='orange',
+                linewidth=3,
+                linestyle='-',
+                marker='o',
+                markersize=6,
+                markerfacecolor='orange',
+                markeredgecolor='darkred',
                 alpha=0.9
             )[0]
 
@@ -7116,22 +7171,22 @@ class PointCloudViewer(ApplicationUI):
                 self.material_polylines_artists[material_idx] = []
             self.material_polylines_artists[material_idx].append(permanent_line)
 
+            # Clear temporary preview
             if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
                 self.current_material_line_artist.remove()
                 self.current_material_line_artist = None
-
             self.material_drawing_points = []
 
-            # Draw filling
+            # === DRAW THE HATCHING / FILLING USING DYNAMIC THICKNESS FROM COORDINATES ===
             self.draw_material_filling(
                 from_chainage_m=from_m,
                 to_chainage_m=to_m,
-                thickness_m=thickness_m,
+                thickness_m=thickness_m,                     # Passed but not used for height
                 material_index=material_idx,
                 material_config=self.material_configs[material_idx],
                 color='#FF9800',
                 alpha=0.6,
-                width_m=config.get('width_m', 0.0)
+                width_m=config.get('width_m', 0.0)  # NEW: Pass width for 3D visualization
             )
 
             self.message_text.append(f"Material segment M{material_idx+1} finished and filled.")
@@ -7139,7 +7194,6 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(f"   Nominal thickness (doc only): {thickness_m*1000:.0f} mm")
 
             self.canvas.draw_idle()
-
         else:
             # Cancelled
             if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
@@ -7184,11 +7238,9 @@ class PointCloudViewer(ApplicationUI):
         else:  # STOP
             self.material_drawing_active = False
             self.finish_material_line_drawing()  # This now triggers dialog + full segment save
-
 # ================================================================================================================================================================
-    
     def finish_material_line_drawing(self):
-        """Called when STOP is clicked - finish multi-point material line drawing"""
+        """Called when STOP is clicked"""
         if len(self.material_drawing_points) < 2:
             if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
                 self.current_material_line_artist.remove()
@@ -7312,24 +7364,14 @@ class PointCloudViewer(ApplicationUI):
             from_m = config.get('from_chainage_m')
             to_m = config.get('to_chainage_m')
             thickness_m = config.get('material_thickness_m', 0.0)
-            width_m = config.get('width_m', 20.0)  # fallback
-            after_rolling_m = config.get('after_rolling_thickness_m', 0.0)
+            width_m = config.get('width_m')
+            after_rolling_m = config.get('after_rolling_thickness_m')
 
             if from_m is None or to_m is None or to_m <= from_m:
                 QMessageBox.warning(self, "Invalid Range", "To chainage must be greater than From chainage.")
                 return
 
-            # Load reference baseline
-            ref_xs, ref_ys = self._load_baseline_from_design_layer(self.material_configs[idx])
-
-            if not ref_xs or len(ref_xs) < 2:
-                self.message_text.append("Warning: No reference baseline found → using 0.0 as bottom")
-                ref_xs = all_xs
-                ref_ys = [0.0] * len(all_xs)
-            else:
-                self.message_text.append(f"Reference baseline loaded successfully with {len(ref_xs)} points")
-
-            # Build segments with REAL thickness calculation
+            # Build segments
             segments = []
             for i in range(num_points - 1):
                 seg_from_m = self.material_drawing_points[i][0]
@@ -7337,47 +7379,15 @@ class PointCloudViewer(ApplicationUI):
                 seg_num = i + 1
 
                 from_X, from_Y, from_Z = self.interpolate_xyz(seg_from_m)
-                to_X, to_Y, to_Z = self.interpolate_xyz(seg_to_m)
+                to_X,   to_Y,   to_Z   = self.interpolate_xyz(seg_to_m)
 
                 seg_poly_points = []
                 for j in range(num_points):
                     x, y = self.material_drawing_points[j]
                     if seg_from_m <= x <= seg_to_m + 1e-6:
-                        chainage = round(x, 3)
-                        material_rel = round(y, 3)
-
-                        # Get reference elevation at this chainage
-                        ref_elev = np.interp(
-                            chainage,
-                            ref_xs,
-                            ref_ys,
-                            left=ref_ys[0],
-                            right=ref_ys[-1]
-                        )
-
-                        # Calculate real thickness (material - reference)
-                        real_thickness = material_rel - ref_elev
-
-                        # Positive thickness for volume calculation (filling)
-                        thickness_positive = max(0.0, real_thickness)  # Changed to prefer positive fill
-
-                        # Get absolute coordinates
-                        X, Y, Z_center = self.get_real_coordinates_from_chainage(chainage)
-                        if X is None or Y is None or Z_center is None:
-                            X, Y, Z_center = self.interpolate_xyz(chainage)
-                        abs_z = Z_center + material_rel
-
                         seg_poly_points.append({
-                            "chainage_m": chainage,
-                            "relative_elevation_m": material_rel,
-                            "reference_elevation_m": round(ref_elev, 3),
-                            "actual_thickness_m": round(real_thickness, 3),
-                            "thickness_positive_m": round(thickness_positive, 3),
-                            "absolute_coordinates": [
-                                round(X, 3),
-                                round(Y, 3),
-                                round(abs_z, 3)
-                            ]
+                            "chainage_m": round(x, 3),
+                            "relative_elevation_m": round(y, 3)
                         })
 
                 segments.append({
@@ -7387,20 +7397,15 @@ class PointCloudViewer(ApplicationUI):
                     "to_chainage_m": round(seg_to_m, 3),
                     "from_chainage_str": self.format_chainage(seg_from_m, for_dialog=True),
                     "to_chainage_str": self.format_chainage(seg_to_m, for_dialog=True),
-                    "from_coordinates": [round(from_X, 3), round(from_Y, 3), round(from_Z, 3)],
-                    "to_coordinates": [round(to_X, 3), round(to_Y, 3), round(to_Z, 3)],
+                    "from_coordinates": [from_X, from_Y, from_Z],
+                    "to_coordinates": [to_X, to_Y, to_Z],
                     "polyline_points": seg_poly_points,
                     "material_thickness_m": thickness_m,
                     "width_m": width_m,
                     "after_rolling_thickness_m": after_rolling_m
                 })
 
-                # Debug: show average thickness for this segment
-                thicknesses = [p["thickness_positive_m"] for p in seg_poly_points]
-                avg_seg = np.mean(thicknesses) if thicknesses else 0.0
-                self.message_text.append(f"Segment {seg_num}: avg positive thickness = {avg_seg:.3f} m")
-
-            # Save with calculated thicknesses
+            # Save
             self.save_material_segment_to_json(
                 material_idx=idx,
                 config=config,
@@ -7417,19 +7422,20 @@ class PointCloudViewer(ApplicationUI):
                 material_config=self.material_configs[idx],
                 color='#FF9800',
                 alpha=0.6,
-                width_m=width_m
+                width_m=width_m  # NEW: Pass width for 3D visualization
             )
 
             total_segs = len(segments)
             self.message_text.append(
-                f"Material M{idx+1} saved successfully!\n"
-                f"→ {total_segs} segments created with REAL height calculation"
+                f"Material M{idx+1} saved!\n"
+                f"   1 JSON with {total_segs} segments (each with own thickness/width/after rolling)"
             )
         else:
             self.message_text.append("Configuration cancelled.")
 
         self.canvas.draw_idle()
         self.material_drawing_points = []
+
 
 # =======================================================================================================================================
 # CONSOLIDATED: Single setup_label_click_handler (remove duplicates; use unified on_label_pick)
@@ -7740,28 +7746,29 @@ class PointCloudViewer(ApplicationUI):
         t = np.clip(chainage_m / total_len, 0.0, 1.0)
         point_3d = start_pt + t * (end_pt - start_pt)
         return round(float(point_3d[0]), 3), round(float(point_3d[1]), 3), round(float(point_3d[2]), 3)
-    
 # =================================================================================================================================================================
     def save_material_segment_to_json(self, material_idx, config, from_m, to_m, point_number=None, polyline_points=None, segments_list=None):
-        """Save material line JSON with volume & height statistics."""
+        """Save material line JSON directly in construction layer root using folder_name as filename."""
         import os
         import json
         from datetime import datetime
-        import numpy as np
 
         mat_config = self.material_configs[material_idx]
-        folder_name = mat_config.get('folder_name')
+        folder_name = mat_config.get('folder_name')  # This will be used as the JSON filename base
         display_name = mat_config.get('name', folder_name)
         if not folder_name:
             QMessageBox.critical(self, "Error", "Material folder name not found.")
             return
 
+        # CRITICAL CHANGE: Save JSON directly in construction layer folder, NOT in a subfolder
         filepath = os.path.join(self.current_construction_layer_path, f"{folder_name}.json")
 
+        # Use accurate real coordinates
         from_X, from_Y, from_Z = self.get_real_coordinates_from_chainage(from_m)
         to_X, to_Y, to_Z = self.get_real_coordinates_from_chainage(to_m)
 
         if from_X is None or to_X is None:
+            self.message_text.append("Warning: Could not get accurate coordinates from alignment. Using fallback.")
             from_X, from_Y, from_Z = self.interpolate_xyz(from_m)
             to_X, to_Y, to_Z = self.interpolate_xyz(to_m)
 
@@ -7771,8 +7778,9 @@ class PointCloudViewer(ApplicationUI):
         # Handle single segment → multi-segment conversion
         if segments_list is None and polyline_points is not None:
             thickness_m = config.get('material_thickness_m', 0.0)
-            width_m = config.get('width_m', 20.0)
+            width_m = config.get('width_m', 0.0)
             after_rolling_m = config.get('after_rolling_thickness_m', 0.0)
+
             seg_poly_points = []
             for p in polyline_points:
                 chainage = p["chainage_m"]
@@ -7785,6 +7793,7 @@ class PointCloudViewer(ApplicationUI):
                     "relative_elevation_m": round(rel_elev, 3),
                     "absolute_coordinates": [round(abs_X, 3), round(abs_Y, 3), round(abs_Z + rel_elev, 3)]
                 })
+
             segments_list = [{
                 "segment_number": 1 if point_number is None else point_number,
                 "segment_label": f"M{material_idx+1}-{1 if point_number is None else point_number}",
@@ -7800,7 +7809,7 @@ class PointCloudViewer(ApplicationUI):
                 "after_rolling_thickness_m": after_rolling_m
             }]
 
-        # Ensure absolute coordinates in all points while preserving existing fields
+        # Ensure absolute coordinates in all points
         if segments_list:
             for segment in segments_list:
                 updated_points = []
@@ -7811,13 +7820,13 @@ class PointCloudViewer(ApplicationUI):
                     if abs_X is None:
                         abs_X, abs_Y, abs_Z = self.interpolate_xyz(chainage)
                     abs_Z_total = abs_Z + rel_elev if abs_Z is not None else rel_elev
-
-                    # Preserve all existing fields and only update/add absolute_coordinates
-                    updated_p = p.copy()  # Copy original dict to keep all fields like thickness
-                    updated_p["absolute_coordinates"] = [round(abs_X, 3), round(abs_Y, 3), round(abs_Z_total, 3)]
-
-                    updated_points.append(updated_p)
+                    updated_points.append({
+                        "chainage_m": round(chainage, 3),
+                        "relative_elevation_m": round(rel_elev, 3),
+                        "absolute_coordinates": [round(abs_X, 3), round(abs_Y, 3), round(abs_Z_total, 3)]
+                    })
                 segment["polyline_points"] = updated_points
+
                 # Update from/to coordinates
                 fX, fY, fZ = self.get_real_coordinates_from_chainage(segment["from_chainage_m"])
                 tX, tY, tZ = self.get_real_coordinates_from_chainage(segment["to_chainage_m"])
@@ -7825,61 +7834,6 @@ class PointCloudViewer(ApplicationUI):
                 if tX is None: tX, tY, tZ = self.interpolate_xyz(segment["to_chainage_m"])
                 segment["from_coordinates"] = [round(fX, 3), round(fY, 3), round(fZ, 3)]
                 segment["to_coordinates"] = [round(tX, 3), round(tY, 3), round(tZ, 3)]
-
-        # ── Calculate volume and heights for each segment ──
-        total_volume = 0.0
-        for segment in segments_list:
-            width_m = segment.get("width_m", 20.0)
-            if width_m <= 0.01:
-                segment["volume_m3"] = 0.0
-                segment["avg_height_m"] = 0.0
-                segment["max_height_m"] = 0.0
-                segment["min_height_m"] = 0.0
-                continue
-
-            points = segment.get("polyline_points", [])
-            if len(points) < 2:
-                segment["volume_m3"] = 0.0
-                continue
-
-            # Make sure points are sorted by chainage
-            points = sorted(points, key=lambda p: p["chainage_m"])
-
-            chainages = np.array([p["chainage_m"] for p in points])
-
-            # ── Use positive thickness ──
-            heights = np.array([p.get("thickness_positive_m", 0.0) for p in points])
-
-            if len(heights) == 0 or np.all(heights == 0):
-                segment["volume_m3"] = 0.0
-                segment["avg_height_m"] = 0.0
-                segment["max_height_m"] = 0.0
-                segment["min_height_m"] = 0.0
-                self.message_text.append("All heights are 0.0 → volume 0 for segment")
-                continue
-
-            avg_height = float(np.mean(heights))
-            max_height = float(np.max(heights))
-            min_height = float(np.min(heights))
-
-            # Trapezoidal volume integration
-            volume = 0.0
-            for i in range(len(chainages) - 1):
-                ds = chainages[i + 1] - chainages[i]
-                if ds <= 0:
-                    continue
-                h1 = heights[i]
-                h2 = heights[i + 1]
-                h_avg = (h1 + h2) / 2.0
-                dV = width_m * h_avg * ds
-                volume += dV
-
-            segment["volume_m3"] = round(volume, 2)
-            segment["avg_height_m"] = round(avg_height, 3)
-            segment["max_height_m"] = round(max_height, 3)
-            segment["min_height_m"] = round(min_height, 3)
-
-            total_volume += volume
 
         data = {
             "material_line_folder": folder_name,
@@ -7899,9 +7853,9 @@ class PointCloudViewer(ApplicationUI):
             "segments": segments_list or [],
             "created_at": datetime.now().isoformat(),
             "worksheet": self.current_worksheet_name,
-            "construction_layer": os.path.basename(self.current_construction_layer_path),
-            "total_volume_m3": round(total_volume, 2)
+            "construction_layer": os.path.basename(self.current_construction_layer_path)
         }
+
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
@@ -7910,7 +7864,6 @@ class PointCloudViewer(ApplicationUI):
             self.update_material_lines_config()
         except Exception as e:
             QMessageBox.critical(self, "Save Failed", f"Error saving JSON:\n{str(e)}")
-
 
 # =====================================================================================================================================
     def update_material_lines_config(self):
@@ -7944,28 +7897,72 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(f"Failed to update material_lines_config.txt: {str(e)}")
 
 # =====================================================================================================================================
-    def get_real_coordinates_from_chainage(self, chainage_m):
-        """
-        Return real-world (X, Y, Z) coordinates for a given chainage in meters.
-        This is the PRIMARY method used everywhere for accurate positioning.
-        """
-        if not hasattr(self, 'horizontal_alignment') or not self.horizontal_alignment:
+    def get_real_coordinates_from_chainage(self, ch):
+        import numpy as np
+
+        if self.curved_alignment is None:
+            self.curved_alignment = self.build_curved_alignment()
+
+        if not self.curved_alignment:
             return None, None, None
-        if not hasattr(self, 'vertical_profile') or not self.vertical_profile:
-            return None, None, None
 
-        try:
-            X, Y = self.horizontal_alignment.get_xy(chainage_m)  # Accurate horizontal position
-        except:
-            X, Y = None, None
+        # Find closest sample with binary search
+        ch_values = np.array([a[0] for a in self.curved_alignment])
+        idx = np.searchsorted(ch_values, ch)
 
-        try:
-            Z = self.vertical_profile.get_elevation(chainage_m)  # Accurate vertical elevation
-        except:
-            Z = None
+        if idx == 0:
+            return tuple(self.curved_alignment[0][1])  # X, Y, Z
+        if idx >= len(ch_values):
+            return tuple(self.curved_alignment[-1][1])
 
-        return X, Y, Z
+        # Interpolate
+        t = (ch - ch_values[idx-1]) / (ch_values[idx] - ch_values[idx-1])
+        pos_prev = self.curved_alignment[idx-1][1]
+        pos_next = self.curved_alignment[idx][1]
+        pos = pos_prev + t * (pos_next - pos_prev)
+        return tuple(pos)
+    
+# =====================================================================================================================================
+    # New: get_local_dir_at_chainage
+    def get_local_dir_at_chainage(self, ch):
+        import numpy as np
 
+        if self.curved_alignment is None:
+            self.curved_alignment = self.build_curved_alignment()
+
+        if not self.curved_alignment:
+            return np.array([1.0, 0.0, 0.0])
+
+        ch_values = np.array([a[0] for a in self.curved_alignment])
+        idx = np.searchsorted(ch_values, ch)
+
+        if idx == 0:
+            return self.curved_alignment[0][2]
+        if idx >= len(ch_values):
+            return self.curved_alignment[-1][2]
+
+        t = (ch - ch_values[idx-1]) / (ch_values[idx] - ch_values[idx-1])
+        dir_prev = self.curved_alignment[idx-1][2]
+        dir_next = self.curved_alignment[idx][2]
+        dir_vec = dir_prev + t * (dir_next - dir_prev)
+        dir_len = np.linalg.norm(dir_vec)
+        return dir_vec / dir_len if dir_len > 0 else dir_prev
+    
+# ==========================================================
+    def get_surface_line_points(self):
+        import numpy as np
+        all_xs = []
+        all_ys = []
+        # Collect from polylines (assume self.line_types['surface']['polylines'] is list of [(x,y), ...])
+        for poly in self.line_types['surface']['polylines']:
+            for x, y in poly:
+                all_xs.append(x)
+                all_ys.append(y)
+        # Sort by x
+        if all_xs:
+            sorted_idx = np.argsort(all_xs)
+            return np.array(all_xs)[sorted_idx], np.array(all_ys)[sorted_idx]
+        return [], []
 # =====================================================================================================================================
     def get_km_and_interval(self, chainage_m):
         """Return km (int) and interval meters (float) from total chainage"""
@@ -8298,7 +8295,6 @@ class PointCloudViewer(ApplicationUI):
                 self.material_segment_labels[material_index].append(annot)
 
         self.canvas.draw_idle()
-
 # =======================================================================================================================================
 # NEW: Method to create 3D virtual top surface for material
     def create_3d_material_surface(self, material_index, xs, ys, width):
@@ -8380,7 +8376,10 @@ class PointCloudViewer(ApplicationUI):
             self.material_3d_actors[material_index] = []
         self.material_3d_actors[material_index].append(actor)
 
-# ==============================================================================================================================================
+
+
+# ======================================================================
+
     # NEW HELPER: Load a design baseline by display name (e.g., "Construction")
     def _load_design_baseline(self, design_name):
         import json
@@ -8648,6 +8647,9 @@ class PointCloudViewer(ApplicationUI):
         self.message_text.append(f"3D material volume created (width {width_m:.1f} m)")
 
 
+    # =========================================================================================================================================================
+    # NEW METHOD: Load baseline from JSON and recreate curve labels from point-embedded angles
+    # =========================================================================================================================================================
     def load_baseline_and_recreate_curves(self, json_path, ltype):
         """
         Loads a single baseline JSON file (e.g., surface_baseline.json).
@@ -8685,7 +8687,7 @@ class PointCloudViewer(ApplicationUI):
         self.line_types[ltype]['polylines'] = polylines_2d
 
         # === RECREATE CURVE LABELS FROM POINT-EMBEDDED ANGLES ===
-        #self.clear_curve_labels()  # Clear any previous
+        self.clear_curve_labels()  # Clear any previous
 
         recreated_count = 0
         for poly in data.get("polylines", []):
