@@ -619,6 +619,7 @@ class PointCloudViewer(ApplicationUI):
                                 f"Mode: {category or 'General'}\n"
                                 f"Point Cloud: {pc_filename}\n\n"
                                 f"Saved in:\n{worksheet_folder}")
+        
 # =======================================================================================================================================
     def display_current_worksheet(self, config_data):
         """
@@ -667,50 +668,16 @@ class PointCloudViewer(ApplicationUI):
             QLabel {
                     font-weight: bold;}
             """)
-            # self.mode_banner.setStyleSheet("""
-            #     QLabel {
-            #         font-size: 22px;
-            #         font-weight: bold;
-            #         color: white;
-            #         background-color: #7B1FA2;
-            #         border-radius: 14px;
-            #         padding: 16px;
-            #         margin: 12px 20px 20px 20px;
-            #         border: 4px solid #4A148C;
-            #     }
-            # """)
+
         elif worksheet_type == "Design":
             self.mode_banner.setText("DESIGN MODE")
             self.mode_banner.setStyleSheet("""
             QLabel {
                     font-weight: bold;}
             """)
-            # self.mode_banner.setStyleSheet("""
-            #     QLabel {
-            #         font-size: 22px;
-            #         font-weight: bold;
-            #         color: white;
-            #         background-color: #2E7D32;
-            #         border-radius: 14px;
-            #         padding: 16px;
-            #         margin: 12px 20px 20px 20px;
-            #         border: 4px solid #1B5E20;
-            #     }
-            # """)
+
         else:
             self.mode_banner.setText("GENERAL MODE")
-            # self.mode_banner.setStyleSheet("""
-            #     QLabel {
-            #         font-size: 20px;
-            #         font-weight: bold;
-            #         color: white;
-            #         background-color: #666666;
-            #         border-radius: 12px;
-            #         padding: 14px;
-            #         margin: 10px 15px 15px 15px;
-            #     }
-            # """)
-
 
 # =======================================================================================================================================
 # # OPEN CREATE NEW DESIGN LAYER DIALOG
@@ -2214,8 +2181,12 @@ class PointCloudViewer(ApplicationUI):
     
 # ===========================================================================================================================================================
     def save_current_design_layer(self):
-        """Save checked baselines using the CURRENT user-confirmed width from dialog.
-        Now saves curve angles directly inside each point that has a curve label."""
+        """
+        Save all checked baselines with:
+        - chainage_str in EVERY point (using existing format_chainage)
+        - surface_to_construction difference (absolute value) in construction baseline
+        - construction_to_road_surface difference (absolute value) in road_surface baseline
+        """
         if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
             QMessageBox.warning(self, "No Worksheet", "No active worksheet.")
             return
@@ -2232,6 +2203,7 @@ class PointCloudViewer(ApplicationUI):
         if not os.path.exists(layer_folder):
             QMessageBox.critical(self, "Folder Missing", f"Design layer folder not found:\n{layer_folder}")
             return
+
         if not self.zero_line_set:
             QMessageBox.warning(self, "Zero Line Required", "Zero line must be set.")
             return
@@ -2243,25 +2215,29 @@ class PointCloudViewer(ApplicationUI):
         zero_length = self.total_distance
         ref_z = self.zero_start_z
 
-        # Helper function to format chainage as "102+062"
-        def format_chainage_str(chainage_m: float) -> str:
-            if not hasattr(self, 'zero_start_km') or self.zero_start_km is None:
-                return f"{chainage_m:.3f}m"
-            km_part = int(self.zero_start_km)
-            metres_part = chainage_m % 1000
-            return f"{km_part}+{metres_part:03.0f}"
+        # ── Load previously saved baselines (if exist) for height difference calculation ──
+        surface_data = None
+        construction_data = None
+        road_surface_data = None
 
-        # Create lookup: chainage → curve config (for fast matching)
-        curve_lookup = {}
-        if self.curve_labels:
-            for item in self.curve_labels:
-                ch = item['chainage']
-                config = item['config']
-                curve_lookup[ch] = {
-                    "angle_deg": float(config['angle']),
-                    "inner_curve": bool(config['inner_curve']),
-                    "outer_curve": bool(config['outer_curve'])
-                }
+        for fname, key in [
+            ("surface_baseline.json", "surface"),
+            ("construction_baseline.json", "construction"),
+            ("road_surface_baseline.json", "road_surface")
+        ]:
+            path = os.path.join(layer_folder, fname)
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    if key == "surface":
+                        surface_data = data
+                    elif key == "construction":
+                        construction_data = data
+                    elif key == "road_surface":
+                        road_surface_data = data
+                except Exception as e:
+                    self.message_text.append(f"Warning: Could not load {fname} for diff calc: {e}")
 
         baseline_checkboxes = {
             'surface': self.surface_baseline,
@@ -2274,17 +2250,17 @@ class PointCloudViewer(ApplicationUI):
         for ltype, checkbox in baseline_checkboxes.items():
             if not checkbox.isChecked():
                 continue
+
             polylines = self.line_types[ltype]['polylines']
             if not polylines:
                 continue
 
-            # CRITICAL: Use the width entered by user in dialog
-            if ltype not in self.baseline_widths or self.baseline_widths[ltype] is None or self.baseline_widths[ltype] <= 0:
+            if ltype not in self.baseline_widths or self.baseline_widths[ltype] <= 0:
                 QMessageBox.warning(
                     self,
                     "Width Missing",
-                    f"No valid width entered for {ltype.replace('_', ' ').title()}.\n"
-                    "Please click 'Map on 3D' and enter width first."
+                    f"No valid width for {ltype.replace('_', ' ').title()}.\n"
+                    "Please set width via 'Map on 3D' first."
                 )
                 continue
 
@@ -2302,7 +2278,6 @@ class PointCloudViewer(ApplicationUI):
                 "polylines": []
             }
 
-            # Convert polylines to 3D world coordinates + add curve if present
             for poly_2d in polylines:
                 poly_3d_points = []
                 for dist, rel_z in poly_2d:
@@ -2311,77 +2286,81 @@ class PointCloudViewer(ApplicationUI):
                     abs_z = ref_z + rel_z
                     world_point = [float(pos_along[0]), float(pos_along[1]), float(abs_z)]
 
-                    point_data = {
+                    point_entry = {
                         "chainage_m": float(dist),
-                        "chainage_str": format_chainage_str(dist),
+                        "chainage_str": self.format_chainage(dist, for_dialog=True),
                         "relative_elevation_m": float(rel_z),
                         "world_coordinates": world_point
                     }
 
-                    # === ADD CURVE DATA DIRECTLY TO POINT IF MATCHES ===
-                    # Use tolerance because floating point might not be exact
-                    matched_curve = None
-                    for curve_ch, curve_config in curve_lookup.items():
-                        if abs(dist - curve_ch) < 0.5:  # 0.5m tolerance
-                            matched_curve = curve_config
-                            break
+                    # ── Add absolute (positive) height difference fields ──
+                    if ltype == "construction" and surface_data:
+                        min_diff = float('inf')
+                        surface_rel = None
+                        for poly in surface_data.get("polylines", []):
+                            for pt in poly.get("points", []):
+                                d = abs(pt["chainage_m"] - dist)
+                                if d < min_diff:
+                                    min_diff = d
+                                    surface_rel = pt["relative_elevation_m"]
+                        if min_diff < 3.0 and surface_rel is not None:
+                            diff = abs(round(surface_rel - rel_z, 6))  # ← Always positive!
+                            point_entry["surface_to_construction_diff_m"] = diff
 
-                    if matched_curve:
-                        point_data.update(matched_curve)  # Adds angle_deg, inner_curve, outer_curve
+                    elif ltype == "road_surface" and construction_data:
+                        min_diff = float('inf')
+                        const_rel = None
+                        for poly in construction_data.get("polylines", []):
+                            for pt in poly.get("points", []):
+                                d = abs(pt["chainage_m"] - dist)
+                                if d < min_diff:
+                                    min_diff = d
+                                    const_rel = pt["relative_elevation_m"]
+                        if min_diff < 3.0 and const_rel is not None:
+                            diff = abs(round(const_rel - rel_z, 6))  # ← Always positive!
+                            point_entry["construction_to_road_surface_diff_m"] = diff
 
-                    poly_3d_points.append(point_data)
+                    poly_3d_points.append(point_entry)
 
                 if len(poly_3d_points) >= 2:
-                    start_chainage = poly_3d_points[0]["chainage_m"]
-                    end_chainage = poly_3d_points[-1]["chainage_m"]
+                    start_ch = poly_3d_points[0]["chainage_m"]
+                    end_ch = poly_3d_points[-1]["chainage_m"]
                     baseline_data["polylines"].append({
-                        "start_chainage_m": float(start_chainage),
-                        "start_chainage_str": format_chainage_str(start_chainage),
-                        "end_chainage_m": float(end_chainage),
-                        "end_chainage_str": format_chainage_str(end_chainage),
+                        "start_chainage_m": float(start_ch),
+                        "start_chainage_str": self.format_chainage(start_ch, for_dialog=True),
+                        "end_chainage_m": float(end_ch),
+                        "end_chainage_str": self.format_chainage(end_ch, for_dialog=True),
                         "points": poly_3d_points
                     })
 
             if not baseline_data["polylines"]:
                 continue
 
-            # Save to JSON file
             json_filename = f"{ltype}_baseline.json"
             json_path = os.path.join(layer_folder, json_filename)
 
             try:
                 with open(json_path, 'w', encoding='utf-8') as f:
-                    json.dump(baseline_data, f, indent=4)
+                    json.dump(baseline_data, f, indent=4, ensure_ascii=False)
                 saved_count += 1
                 saved_files.append(json_filename)
             except Exception as e:
                 QMessageBox.critical(self, "Save Failed", f"Error saving {json_filename}:\n{str(e)}")
                 return
 
-        # Final success message
         if saved_count > 0:
             file_list = "\n".join([f"• {f}" for f in saved_files])
-            self.message_text.append(f"Saved {saved_count} baseline(s) to '{self.current_layer_name}':")
+            self.message_text.append(f"Saved {saved_count} baseline(s):")
             self.message_text.append(file_list)
-
-            # Detect if any curve was saved
-            has_curves = any(
-                any("angle_deg" in pt for pt in poly["points"])
-                for f in saved_files
-                for poly in json.load(open(os.path.join(layer_folder, f)))["polylines"]
-            )
-            curve_note = "\nCurve angles saved inside points." if has_curves else ""
 
             QMessageBox.information(
                 self,
                 "Save Successful",
-                f"Saved {saved_count} baseline(s) with user-defined widths.{curve_note}\n\n"
-                f"Files:\n{file_list}\n\n"
-                f"Location:\n{layer_folder}"
+                f"Saved {saved_count} baseline(s) with chainage strings & **positive** height differences.\n\n"
+                f"Files:\n{file_list}\n\nLocation:\n{layer_folder}"
             )
         else:
-            QMessageBox.information(self, "Nothing to Save", "No checked baselines with drawn lines or valid widths.")
-
+            QMessageBox.information(self, "Nothing Saved", "No valid baselines to save.")
 # ===========================================================================================================================================================
     def map_baselines_to_3d_planes_from_data(self, loaded_baselines):
         """Generate 3D planes from loaded baseline data — NOW WITH REAL CURVES using self.curve_labels"""
