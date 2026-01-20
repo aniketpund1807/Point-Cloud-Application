@@ -2180,12 +2180,11 @@ class PointCloudViewer(ApplicationUI):
         return loaded_baselines
     
 # ===========================================================================================================================================================
+
     def save_current_design_layer(self):
         """
-        Save all checked baselines with:
-        - chainage_str in EVERY point (using existing format_chainage)
-        - surface_to_construction difference (absolute value) in construction baseline
-        - construction_to_road_surface difference (absolute value) in road_surface baseline
+        Save checked baselines + create realistic earthwork operation_config.json
+        after road_surface is saved.
         """
         if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
             QMessageBox.warning(self, "No Worksheet", "No active worksheet.")
@@ -2208,14 +2207,7 @@ class PointCloudViewer(ApplicationUI):
             QMessageBox.warning(self, "Zero Line Required", "Zero line must be set.")
             return
 
-        saved_count = 0
-        saved_files = []
-
-        dir_vec = self.zero_end_point - self.zero_start_point
-        zero_length = self.total_distance
-        ref_z = self.zero_start_z
-
-        # ── Load previously saved baselines (if exist) for height difference calculation ──
+        # ── Load all baselines ───────────────────────────────────────────────
         surface_data = None
         construction_data = None
         road_surface_data = None
@@ -2237,7 +2229,15 @@ class PointCloudViewer(ApplicationUI):
                     elif key == "road_surface":
                         road_surface_data = data
                 except Exception as e:
-                    self.message_text.append(f"Warning: Could not load {fname} for diff calc: {e}")
+                    self.message_text.append(f"Warning: Could not load {fname}: {e}")
+
+        saved_count = 0
+        saved_files = []
+        road_surface_just_saved = False
+
+        dir_vec = self.zero_end_point - self.zero_start_point
+        zero_length = self.total_distance
+        ref_z = self.zero_start_z
 
         baseline_checkboxes = {
             'surface': self.surface_baseline,
@@ -2284,6 +2284,7 @@ class PointCloudViewer(ApplicationUI):
                     t = dist / zero_length if zero_length > 0 else 0
                     pos_along = self.zero_start_point + t * dir_vec
                     abs_z = ref_z + rel_z
+
                     world_point = [float(pos_along[0]), float(pos_along[1]), float(abs_z)]
 
                     point_entry = {
@@ -2293,7 +2294,7 @@ class PointCloudViewer(ApplicationUI):
                         "world_coordinates": world_point
                     }
 
-                    # ── Add absolute (positive) height difference fields ──
+                    # Height differences (reference only)
                     if ltype == "construction" and surface_data:
                         min_diff = float('inf')
                         surface_rel = None
@@ -2303,8 +2304,8 @@ class PointCloudViewer(ApplicationUI):
                                 if d < min_diff:
                                     min_diff = d
                                     surface_rel = pt["relative_elevation_m"]
-                        if min_diff < 3.0 and surface_rel is not None:
-                            diff = abs(round(surface_rel - rel_z, 6))  # ← Always positive!
+                        if surface_rel is not None:
+                            diff = abs(round(surface_rel - rel_z, 3))
                             point_entry["surface_to_construction_diff_m"] = diff
 
                     elif ltype == "road_surface" and construction_data:
@@ -2316,8 +2317,8 @@ class PointCloudViewer(ApplicationUI):
                                 if d < min_diff:
                                     min_diff = d
                                     const_rel = pt["relative_elevation_m"]
-                        if min_diff < 3.0 and const_rel is not None:
-                            diff = abs(round(const_rel - rel_z, 6))  # ← Always positive!
+                        if const_rel is not None:
+                            diff = abs(round(const_rel - rel_z, 3))
                             point_entry["construction_to_road_surface_diff_m"] = diff
 
                     poly_3d_points.append(point_entry)
@@ -2344,23 +2345,184 @@ class PointCloudViewer(ApplicationUI):
                     json.dump(baseline_data, f, indent=4, ensure_ascii=False)
                 saved_count += 1
                 saved_files.append(json_filename)
+
+                if ltype == "road_surface":
+                    road_surface_just_saved = True
+                    road_surface_data = baseline_data  # update reference
+
             except Exception as e:
                 QMessageBox.critical(self, "Save Failed", f"Error saving {json_filename}:\n{str(e)}")
                 return
 
+        # ────────────────────────────────────────────────────────────────
+        #   After road surface save → add diff + realistic earthwork config
+        # ────────────────────────────────────────────────────────────────
+        if road_surface_just_saved and surface_data and road_surface_data:
+
+            # 1. Add surface_to_road_surface_diff_m to road surface points
+            for poly in road_surface_data["polylines"]:
+                for pt in poly["points"]:
+                    ch = pt["chainage_m"]
+                    min_d = float('inf')
+                    surf_rel = None
+                    for s_poly in surface_data.get("polylines", []):
+                        for s_pt in s_poly.get("points", []):
+                            d = abs(s_pt["chainage_m"] - ch)
+                            if d < min_d:
+                                min_d = d
+                                surf_rel = s_pt["relative_elevation_m"]
+                    if surf_rel is not None:
+                        abs_diff = abs(round(surf_rel - pt["relative_elevation_m"], 3))
+                        pt["surface_to_road_surface_diff_m"] = abs_diff
+
+            # Save updated road_surface
+            rs_path = os.path.join(layer_folder, "road_surface_baseline.json")
+            try:
+                with open(rs_path, 'w', encoding='utf-8') as f:
+                    json.dump(road_surface_data, f, indent=4, ensure_ascii=False)
+                self.message_text.append("Updated road_surface_baseline.json with surface diff")
+            except Exception as e:
+                self.message_text.append(f"Warning: Could not update road surface json: {e}")
+
+            # 2. Create realistic earthwork operation_config.json
+            operations = []
+
+            if road_surface_data.get("polylines"):
+                main_poly = road_surface_data["polylines"][0]
+                points = main_poly["points"]
+
+                TOLERANCE = 0.04  # meters
+
+                # Get widths once
+                w_construction = self.baseline_widths.get("construction", 20.0)
+                w_road_surface = self.baseline_widths.get("road_surface", 12.0)
+
+                for i in range(len(points) - 1):
+                    p1 = points[i]
+                    p2 = points[i + 1]
+
+                    ch1 = p1["chainage_m"]
+                    ch2 = p2["chainage_m"]
+                    str1 = p1["chainage_str"]
+                    str2 = p2["chainage_str"]
+
+                    length = ch2 - ch1
+                    if length <= 0:
+                        continue
+
+                    def get_abs_elev(baseline_data, chainage, ref_z):
+                        min_d = float('inf')
+                        rel_elev = None
+                        for poly in baseline_data.get("polylines", []):
+                            for pt in poly["points"]:
+                                d = abs(pt["chainage_m"] - chainage)
+                                if d < min_d:
+                                    min_d = d
+                                    rel_elev = pt["relative_elevation_m"]
+                        if rel_elev is not None and min_d < 10.0:
+                            return ref_z + rel_elev
+                        return None
+
+                    surf_z1 = get_abs_elev(surface_data, ch1, ref_z)
+                    surf_z2 = get_abs_elev(surface_data, ch2, ref_z)
+                    road_z1 = get_abs_elev(road_surface_data, ch1, ref_z)
+                    road_z2 = get_abs_elev(road_surface_data, ch2, ref_z)
+
+                    const_z1 = get_abs_elev(construction_data, ch1, ref_z) if construction_data else None
+                    const_z2 = get_abs_elev(construction_data, ch2, ref_z) if construction_data else None
+
+                    # Start with safe defaults (without the fields you don't want)
+                    segment = {
+                        "from_chainage_str": str1,
+                        "to_chainage_str": str2,
+                        "operation_type": "data_missing",
+                        "cut_volume_ref_construction_m3": 0.0,
+                        "cut_volume_ref_road_surface_m3": 0.0,
+                        "digging_volume_m3": 0.0,
+                        "width_construction_m": round(w_construction, 1),
+                        "width_road_surface_m": round(w_road_surface, 1)
+                    }
+
+                    if surf_z1 is None or surf_z2 is None or road_z1 is None or road_z2 is None:
+                        operations.append(segment)
+                        continue
+
+                    avg_surf = (surf_z1 + surf_z2) / 2
+                    avg_road = (road_z1 + road_z2) / 2
+                    height_surf_road = avg_surf - avg_road
+
+                    cut_vol_constr = 0.0
+                    cut_vol_road = 0.0
+                    digging_vol = 0.0
+                    operation = "balanced"
+
+                    if height_surf_road > TOLERANCE:
+                        # CUTTING
+                        operation = "cutting"
+
+                        if const_z1 is not None and const_z2 is not None:
+                            avg_const = (const_z1 + const_z2) / 2
+                            h_constr = avg_surf - avg_const
+                            if h_constr > 0:
+                                cut_vol_constr = round(h_constr * w_construction * length, 2)
+
+                        h_road = height_surf_road
+                        cut_vol_road = round(h_road * w_road_surface * length, 2)
+
+                    elif height_surf_road < -TOLERANCE:
+                        # DIGGING
+                        operation = "digging"
+                        h_dig = -height_surf_road
+                        digging_vol = round(h_dig * w_road_surface * length, 2)
+
+                    # Update only the fields we keep
+                    segment["operation_type"] = operation
+
+                    if operation == "cutting":
+                        segment["cut_volume_ref_construction_m3"] = cut_vol_constr
+                        segment["cut_volume_ref_road_surface_m3"] = cut_vol_road
+                    elif operation == "digging":
+                        segment["digging_volume_m3"] = digging_vol
+
+                    operations.append(segment)
+
+            # Sort by from_chainage_str (string sort is usually fine for chainage labels)
+            operations.sort(key=lambda x: x["from_chainage_str"])
+
+            config_data = {
+                "zero_line_start": self.zero_start_point.tolist(),
+                "zero_line_end": self.zero_end_point.tolist(),
+                "zero_start_elevation": float(ref_z),
+                "total_chainage_length": float(zero_length),
+                "calculation_date": "2026-01-20",
+                "volume_method": "Average End Area (Trapezoidal)",
+                "segments": operations
+            }
+
+            config_path = os.path.join(layer_folder, "operation_config.json")
+            try:
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    json.dump(config_data, f, indent=4, ensure_ascii=False)
+                saved_files.append("operation_config.json")
+                self.message_text.append("Created earthwork operation_config.json")
+            except Exception as e:
+                self.message_text.append(f"Warning: Could not create operation_config.json: {e}")
+
+        # ── Final feedback ───────────────────────────────────────────────────
         if saved_count > 0:
             file_list = "\n".join([f"• {f}" for f in saved_files])
-            self.message_text.append(f"Saved {saved_count} baseline(s):")
+            self.message_text.append(f"Saved/updated {saved_count} baseline(s) + config:")
             self.message_text.append(file_list)
 
             QMessageBox.information(
                 self,
                 "Save Successful",
-                f"Saved {saved_count} baseline(s) with chainage strings & **positive** height differences.\n\n"
+                f"Saved/updated {saved_count} baseline(s) and created earthwork config.\n\n"
                 f"Files:\n{file_list}\n\nLocation:\n{layer_folder}"
             )
         else:
             QMessageBox.information(self, "Nothing Saved", "No valid baselines to save.")
+            
 # ===========================================================================================================================================================
     def map_baselines_to_3d_planes_from_data(self, loaded_baselines):
         """Generate 3D planes from loaded baseline data — NOW WITH REAL CURVES using self.curve_labels"""
