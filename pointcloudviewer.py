@@ -2180,12 +2180,13 @@ class PointCloudViewer(ApplicationUI):
         return loaded_baselines
     
 # ===========================================================================================================================================================
-
     def save_current_design_layer(self):
         """
         Save checked baselines + create realistic earthwork operation_config.json
         after road_surface is saved.
         """
+        import numpy as np
+
         if not hasattr(self, 'current_worksheet_name') or not self.current_worksheet_name:
             QMessageBox.warning(self, "No Worksheet", "No active worksheet.")
             return
@@ -2278,9 +2279,52 @@ class PointCloudViewer(ApplicationUI):
                 "polylines": []
             }
 
+            # Prepare reference xs, ys for diffs if needed
+            ref_xs = np.array([])
+            ref_ys = np.array([])
+            if ltype == "construction" and surface_data:
+                ref_points = []
+                for poly in surface_data.get("polylines", []):
+                    for pt in poly.get("points", []):
+                        ref_points.append((pt["chainage_m"], pt["relative_elevation_m"]))
+                if ref_points:
+                    ref_points = sorted(ref_points, key=lambda p: p[0])
+                    ref_xs = np.array([p[0] for p in ref_points])
+                    ref_ys = np.array([p[1] for p in ref_points])
+            elif ltype == "road_surface" and construction_data:
+                ref_points = []
+                for poly in construction_data.get("polylines", []):
+                    for pt in poly.get("points", []):
+                        ref_points.append((pt["chainage_m"], pt["relative_elevation_m"]))
+                if ref_points:
+                    ref_points = sorted(ref_points, key=lambda p: p[0])
+                    ref_xs = np.array([p[0] for p in ref_points])
+                    ref_ys = np.array([p[1] for p in ref_points])
+
             for poly_2d in polylines:
+                if len(poly_2d) < 2:
+                    continue
+
+                # Densify the polyline
+                original_xs = np.array([p[0] for p in poly_2d])
+                original_ys = np.array([p[1] for p in poly_2d])
+                sort_idx = np.argsort(original_xs)
+                original_xs = original_xs[sort_idx]
+                original_ys = original_ys[sort_idx]
+
+                min_x = original_xs[0]
+                max_x = original_xs[-1]
+
+                step = 2.0  # Fixed step of 2 meters
+                intermediate_xs = np.arange(min_x + step, max_x, step)
+
+                all_xs = np.sort(np.unique(np.concatenate([original_xs, intermediate_xs])))
+                all_ys = np.interp(all_xs, original_xs, original_ys)
+
+                dense_poly_2d = list(zip(all_xs, all_ys))
+
                 poly_3d_points = []
-                for dist, rel_z in poly_2d:
+                for dist, rel_z in dense_poly_2d:
                     t = dist / zero_length if zero_length > 0 else 0
                     pos_along = self.zero_start_point + t * dir_vec
                     abs_z = ref_z + rel_z
@@ -2289,37 +2333,20 @@ class PointCloudViewer(ApplicationUI):
 
                     point_entry = {
                         "chainage_m": float(dist),
-                        "chainage_str": self.format_chainage(dist, for_dialog=True),
+                        "chainage_str": self.format_chainage(float(dist), for_dialog=True),
                         "relative_elevation_m": float(rel_z),
                         "world_coordinates": world_point
                     }
 
-                    # Height differences (reference only)
-                    if ltype == "construction" and surface_data:
-                        min_diff = float('inf')
-                        surface_rel = None
-                        for poly in surface_data.get("polylines", []):
-                            for pt in poly.get("points", []):
-                                d = abs(pt["chainage_m"] - dist)
-                                if d < min_diff:
-                                    min_diff = d
-                                    surface_rel = pt["relative_elevation_m"]
-                        if surface_rel is not None:
-                            diff = abs(round(surface_rel - rel_z, 3))
-                            point_entry["surface_to_construction_diff_m"] = diff
-
-                    elif ltype == "road_surface" and construction_data:
-                        min_diff = float('inf')
-                        const_rel = None
-                        for poly in construction_data.get("polylines", []):
-                            for pt in poly.get("points", []):
-                                d = abs(pt["chainage_m"] - dist)
-                                if d < min_diff:
-                                    min_diff = d
-                                    const_rel = pt["relative_elevation_m"]
-                        if const_rel is not None:
-                            diff = abs(round(const_rel - rel_z, 3))
-                            point_entry["construction_to_road_surface_diff_m"] = diff
+                    # Height differences (interpolated)
+                    if len(ref_xs) > 0:
+                        ref_rel = np.interp(dist, ref_xs, ref_ys, left=np.nan, right=np.nan)
+                        if not np.isnan(ref_rel):
+                            diff = abs(round(ref_rel - rel_z, 3))
+                            if ltype == "construction":
+                                point_entry["surface_to_construction_diff_m"] = diff
+                            elif ltype == "road_surface":
+                                point_entry["construction_to_road_surface_diff_m"] = diff
 
                     poly_3d_points.append(point_entry)
 
@@ -2359,21 +2386,24 @@ class PointCloudViewer(ApplicationUI):
         # ────────────────────────────────────────────────────────────────
         if road_surface_just_saved and surface_data and road_surface_data:
 
-            # 1. Add surface_to_road_surface_diff_m to road surface points
-            for poly in road_surface_data["polylines"]:
-                for pt in poly["points"]:
-                    ch = pt["chainage_m"]
-                    min_d = float('inf')
-                    surf_rel = None
-                    for s_poly in surface_data.get("polylines", []):
-                        for s_pt in s_poly.get("points", []):
-                            d = abs(s_pt["chainage_m"] - ch)
-                            if d < min_d:
-                                min_d = d
-                                surf_rel = s_pt["relative_elevation_m"]
-                    if surf_rel is not None:
-                        abs_diff = abs(round(surf_rel - pt["relative_elevation_m"], 3))
-                        pt["surface_to_road_surface_diff_m"] = abs_diff
+            # Collect surface ref for interp
+            surf_ref_points = []
+            for poly in surface_data.get("polylines", []):
+                for pt in poly.get("points", []):
+                    surf_ref_points.append((pt["chainage_m"], pt["relative_elevation_m"]))
+            if surf_ref_points:
+                surf_ref_points = sorted(surf_ref_points, key=lambda p: p[0])
+                surf_xs = np.array([p[0] for p in surf_ref_points])
+                surf_ys = np.array([p[1] for p in surf_ref_points])
+
+                # 1. Add surface_to_road_surface_diff_m to road surface points
+                for poly in road_surface_data["polylines"]:
+                    for pt in poly["points"]:
+                        ch = pt["chainage_m"]
+                        surf_rel = np.interp(ch, surf_xs, surf_ys, left=np.nan, right=np.nan)
+                        if not np.isnan(surf_rel):
+                            diff = abs(round(surf_rel - pt["relative_elevation_m"], 3))
+                            pt["surface_to_road_surface_diff_m"] = diff
 
             # Save updated road_surface
             rs_path = os.path.join(layer_folder, "road_surface_baseline.json")
@@ -2431,7 +2461,7 @@ class PointCloudViewer(ApplicationUI):
                     const_z1 = get_abs_elev(construction_data, ch1, ref_z) if construction_data else None
                     const_z2 = get_abs_elev(construction_data, ch2, ref_z) if construction_data else None
 
-                    # Start with safe defaults (without the fields you don't want)
+                    # Start with safe defaults
                     segment = {
                         "from_chainage_str": str1,
                         "to_chainage_str": str2,
@@ -2508,7 +2538,7 @@ class PointCloudViewer(ApplicationUI):
             except Exception as e:
                 self.message_text.append(f"Warning: Could not create operation_config.json: {e}")
 
-        # ── Final feedback ───────────────────────────────────────────────────
+        # ── Response ───────────────────────────────────────────────────
         if saved_count > 0:
             file_list = "\n".join([f"• {f}" for f in saved_files])
             self.message_text.append(f"Saved/updated {saved_count} baseline(s) + config:")
@@ -2522,7 +2552,6 @@ class PointCloudViewer(ApplicationUI):
             )
         else:
             QMessageBox.information(self, "Nothing Saved", "No valid baselines to save.")
-            
 # ===========================================================================================================================================================
     def map_baselines_to_3d_planes_from_data(self, loaded_baselines):
         """Generate 3D planes from loaded baseline data — NOW WITH REAL CURVES using self.curve_labels"""
@@ -7327,111 +7356,73 @@ class PointCloudViewer(ApplicationUI):
             self.finish_material_line_drawing()  # This now triggers dialog + full segment save
 
 # ================================================================================================================================================================
-    
+
     def finish_material_line_drawing(self):
-        """Called when STOP is clicked - finish multi-point material line drawing"""
+        """Called when STOP is clicked - finish multi-point material line drawing
+        → densifies points every ~2 m → splits into ~20m segments 
+        → each dense point gets its own 2m interval in from/to chainage strings
+        → adds segment labels on graph → saves JSON
+        """
         if len(self.material_drawing_points) < 2:
-            if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
-                self.current_material_line_artist.remove()
-                self.current_material_line_artist = None
-            self.material_drawing_points = []
-            idx = self.active_material_index
-            if idx in self.material_segment_labels:
-                for label in self.material_segment_labels[idx]:
-                    label.remove()
-                self.material_segment_labels[idx] = []
+            self._cleanup_drawing_preview_and_labels()
             self.message_text.append("Drawing cancelled — need at least 2 points.")
             self.canvas.draw_idle()
             return
 
         idx = self.active_material_index
 
-        # Sort + snap to intervals
+        # 1. Sort drawn points by chainage
         self.material_drawing_points.sort(key=lambda p: p[0])
-        drawn_xs = [p[0] for p in self.material_drawing_points]
-        drawn_ys = [p[1] for p in self.material_drawing_points]
+        drawn_xs = np.array([p[0] for p in self.material_drawing_points])
+        drawn_ys = np.array([p[1] for p in self.material_drawing_points])
 
         min_x = drawn_xs[0]
         max_x = drawn_xs[-1]
 
-        import numpy as np
-        interval = getattr(self, 'zero_interval', 20.0)
-        first_target = np.ceil(min_x / interval) * interval
-        target_xs = np.arange(first_target, max_x + 1e-6, interval).tolist()
+        # 2. Densify: create points every 2 meters
+        DENSE_STEP = 2.0  # interval for dummy points and per-point from/to strings
+        dense_chainages = np.arange(
+            np.ceil(min_x / DENSE_STEP) * DENSE_STEP,
+            max_x + 1e-6,
+            DENSE_STEP
+        )
 
-        all_xs = sorted(set([min_x, max_x] + target_xs))
-        all_ys = np.interp(all_xs, drawn_xs, drawn_ys, left=drawn_ys[0], right=drawn_ys[-1])
+        # Include exact start & end points
+        all_chainages = np.sort(np.unique(np.concatenate([[min_x, max_x], dense_chainages])))
+        all_elevations = np.interp(all_chainages, drawn_xs, drawn_ys,
+                                left=drawn_ys[0], right=drawn_ys[-1])
 
-        self.material_drawing_points = list(zip(all_xs, all_ys))
+        # Update drawing points to dense version
+        self.material_drawing_points = list(zip(all_chainages, all_elevations))
 
-        # Clean old permanent lines
+        # 3. Clean old permanent lines & labels
         if idx in self.material_polylines_artists:
             for line in self.material_polylines_artists[idx]:
                 if line in self.ax.lines:
                     line.remove()
             self.material_polylines_artists[idx] = []
 
-        # Draw permanent line
+        if idx in self.material_segment_labels:
+            for label in self.material_segment_labels[idx]:
+                label.remove()
+            self.material_segment_labels[idx] = []
+
+        # 4. Draw dense permanent line
         xs = [p[0] for p in self.material_drawing_points]
         ys = [p[1] for p in self.material_drawing_points]
 
         permanent_line = self.ax.plot(
             xs, ys,
             color='orange', linewidth=3, linestyle='-',
-            marker='o', markersize=6,
-            markerfacecolor='orange', markeredgecolor='darkred',
-            alpha=0.9
+            marker='o', markersize=4, markeredgecolor='darkred',
+            markerfacecolor='orange', alpha=0.9
         )[0]
 
         self.material_polylines_artists.setdefault(idx, []).append(permanent_line)
 
-        # Clear old labels
-        if idx in self.material_segment_labels:
-            for label in self.material_segment_labels[idx]:
-                label.remove()
-            self.material_segment_labels[idx] = []
-
-        # Add labels between points
-        self.material_segment_labels[idx] = []
-        num_points = len(self.material_drawing_points)
-
-        for i in range(num_points - 1):
-            prev_x, prev_y = self.material_drawing_points[i]
-            curr_x, curr_y = self.material_drawing_points[i + 1]
-            mid_x = (prev_x + curr_x) / 2
-            mid_y = max(prev_y, curr_y) + 0.25
-            seg_num = i + 1
-            label_text = f"M{idx+1}-{seg_num}"
-
-            annot = self.ax.annotate(
-                label_text, (mid_x, mid_y),
-                xytext=(0, 12), textcoords='offset points',
-                ha='center', va='bottom',
-                fontsize=9, fontweight='bold', color='white',
-                bbox=dict(boxstyle='round,pad=0.4', facecolor='orange', alpha=0.9, edgecolor='darkorange'),
-                picker=10
-            )
-
-            annot.point_data = {
-                'type': 'material_segment_label',
-                'material_index': idx,
-                'segment_number': seg_num,
-                'from_chainage_m': prev_x,
-                'to_chainage_m': curr_x,
-                'config': {}
-            }
-            self.material_segment_labels[idx].append(annot)
-
-        # Clear preview
-        if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
-            self.current_material_line_artist.remove()
-            self.current_material_line_artist = None
-
-        self.canvas.draw_idle()
-
-        # Open configuration dialog
+        # 5. Open configuration dialog for the whole material line
         from_chainage_str = self.format_chainage(min_x, for_dialog=True)
-        to_chainage_str = self.format_chainage(max_x, for_dialog=True)
+        to_chainage_str   = self.format_chainage(max_x, for_dialog=True)
 
         dialog = MaterialSegmentDialog(
             from_chainage=from_chainage_str,
@@ -7443,84 +7434,95 @@ class PointCloudViewer(ApplicationUI):
         )
         dialog.setWindowTitle(f"Configure Material Line - M{idx+1}")
 
-        if dialog.exec_() == QDialog.Accepted:
-            config = dialog.get_data()
-            if config is None:
-                self.message_text.append("Configuration cancelled.")
-                self.canvas.draw_idle()
-                return
+        if dialog.exec_() != QDialog.Accepted:
+            self.message_text.append("Configuration cancelled.")
+            self._cleanup_drawing_preview_and_labels()
+            self.canvas.draw_idle()
+            return
 
-            from_m = config.get('from_chainage_m')
-            to_m = config.get('to_chainage_m')
-            thickness_m = config.get('material_thickness_m', 0.0)
-            width_m = config.get('width_m', 20.0)  # fallback
-            after_rolling_m = config.get('after_rolling_thickness_m', 0.0)
+        config = dialog.get_data()
+        if not config:
+            return
 
-            if from_m is None or to_m is None or to_m <= from_m:
-                QMessageBox.warning(self, "Invalid Range", "To chainage must be greater than From chainage.")
-                return
+        from_m = config.get('from_chainage_m')
+        to_m   = config.get('to_chainage_m')
+        nominal_thickness_m = config.get('material_thickness_m', 0.0)
+        width_m = config.get('width_m', 20.0)
+        after_rolling_m = config.get('after_rolling_thickness_m', 0.0)
 
-            # Load reference baseline
-            ref_xs, ref_ys = self._load_baseline_from_design_layer(self.material_configs[idx])
+        if from_m is None or to_m is None or to_m <= from_m:
+            QMessageBox.warning(self, "Invalid Range", "To > From chainage required.")
+            return
 
-            if not ref_xs or len(ref_xs) < 2:
-                self.message_text.append("Warning: No reference baseline found → using 0.0 as bottom")
-                ref_xs = all_xs
-                ref_ys = [0.0] * len(all_xs)
-            else:
-                self.message_text.append(f"Reference baseline loaded successfully with {len(ref_xs)} points")
+        # 6. Load reference baseline (bottom surface)
+        ref_xs, ref_ys = self._load_baseline_from_design_layer(self.material_configs[idx])
+        if not ref_xs or len(ref_xs) < 2:
+            self.message_text.append("Warning: No reference baseline → bottom = 0.0 m")
+            ref_xs = all_chainages
+            ref_ys = np.zeros_like(all_chainages)
 
-            # Build segments with REAL thickness calculation
-            segments = []
-            for i in range(num_points - 1):
-                seg_from_m = self.material_drawing_points[i][0]
-                seg_to_m = self.material_drawing_points[i + 1][0]
-                seg_num = i + 1
+        # 7. Split into segments every ~20 m
+        SEGMENT_STEP = 20.0
+        segment_starts = np.arange(
+            min_x,
+            max_x + 1e-6,
+            SEGMENT_STEP
+        )
+        if segment_starts[-1] < max_x:
+            segment_starts = np.append(segment_starts, max_x)
 
-                from_X, from_Y, from_Z = self.interpolate_xyz(seg_from_m)
-                to_X, to_Y, to_Z = self.interpolate_xyz(seg_to_m)
+        segments = []
+        for seg_idx in range(len(segment_starts) - 1):
+            seg_from_m = segment_starts[seg_idx]
+            seg_to_m   = segment_starts[seg_idx + 1]
 
-                seg_poly_points = []
-                for j in range(num_points):
-                    x, y = self.material_drawing_points[j]
-                    if seg_from_m <= x <= seg_to_m + 1e-6:
-                        chainage = round(x, 3)
-                        material_rel = round(y, 3)
+            # Collect dense points in this segment
+            mask = (all_chainages >= seg_from_m) & (all_chainages <= seg_to_m + 1e-6)
+            seg_chainages = all_chainages[mask]
+            seg_elevations = all_elevations[mask]
 
-                        # Get reference elevation at this chainage
-                        ref_elev = np.interp(
-                            chainage,
-                            ref_xs,
-                            ref_ys,
-                            left=ref_ys[0],
-                            right=ref_ys[-1]
-                        )
+            seg_poly_points = []
+            for ch, rel_elev in zip(seg_chainages, seg_elevations):
+                ref_elev = np.interp(ch, ref_xs, ref_ys, left=ref_ys[0], right=ref_ys[-1])
+                real_thickness = rel_elev - ref_elev
+                thickness_positive = max(0.0, real_thickness)
 
-                        # Calculate real thickness (material - reference)
-                        real_thickness = material_rel - ref_elev
+                X, Y, Z_center = self.get_real_coordinates_from_chainage(ch)
+                if X is None:
+                    X, Y, Z_center = self.interpolate_xyz(ch)
+                abs_z = Z_center + rel_elev
 
-                        # Positive thickness for volume calculation (filling)
-                        thickness_positive = max(0.0, real_thickness)  # Changed to prefer positive fill
+                # ────────────────────────────────────────────────────────────────
+                #  CRITICAL FIX: Each dense point gets its own 2-meter interval
+                # ────────────────────────────────────────────────────────────────
+                interval_start_m = np.floor(ch / DENSE_STEP) * DENSE_STEP
+                interval_end_m   = interval_start_m + DENSE_STEP
 
-                        # Get absolute coordinates
-                        X, Y, Z_center = self.get_real_coordinates_from_chainage(chainage)
-                        if X is None or Y is None or Z_center is None:
-                            X, Y, Z_center = self.interpolate_xyz(chainage)
-                        abs_z = Z_center + material_rel
+                # Fix last point in interval if exactly at boundary
+                if abs(ch - interval_end_m) < 1e-6:
+                    interval_end_m = ch
 
-                        seg_poly_points.append({
-                            "chainage_m": chainage,
-                            "relative_elevation_m": material_rel,
-                            "reference_elevation_m": round(ref_elev, 3),
-                            "actual_thickness_m": round(real_thickness, 3),
-                            "thickness_positive_m": round(thickness_positive, 3),
-                            "absolute_coordinates": [
-                                round(X, 3),
-                                round(Y, 3),
-                                round(abs_z, 3)
-                            ]
-                        })
+                from_str = self.format_chainage(interval_start_m, for_dialog=True)
+                to_str   = self.format_chainage(interval_end_m, for_dialog=True)
 
+                point_entry = {
+                    "from_chainage_str": from_str,
+                    "to_chainage_str":   to_str,
+                    "chainage_m": round(float(ch), 3),
+                    "relative_elevation_m": round(float(rel_elev), 3),
+                    "reference_elevation_m": round(float(ref_elev), 3),
+                    "actual_thickness_m": round(real_thickness, 3),
+                    "thickness_positive_m": round(thickness_positive, 3),
+                    "absolute_coordinates": [
+                        round(float(X), 3),
+                        round(float(Y), 3),
+                        round(float(abs_z), 3)
+                    ]
+                }
+                seg_poly_points.append(point_entry)
+
+            if len(seg_poly_points) >= 2:
+                seg_num = seg_idx + 1
                 segments.append({
                     "segment_number": seg_num,
                     "segment_label": f"M{idx+1}-{seg_num}",
@@ -7528,50 +7530,94 @@ class PointCloudViewer(ApplicationUI):
                     "to_chainage_m": round(seg_to_m, 3),
                     "from_chainage_str": self.format_chainage(seg_from_m, for_dialog=True),
                     "to_chainage_str": self.format_chainage(seg_to_m, for_dialog=True),
-                    "from_coordinates": [round(from_X, 3), round(from_Y, 3), round(from_Z, 3)],
-                    "to_coordinates": [round(to_X, 3), round(to_Y, 3), round(to_Z, 3)],
+                    "from_coordinates": self._get_xyz_tuple(seg_from_m),
+                    "to_coordinates": self._get_xyz_tuple(seg_to_m),
                     "polyline_points": seg_poly_points,
-                    "material_thickness_m": thickness_m,
+                    "material_thickness_m": nominal_thickness_m,
                     "width_m": width_m,
                     "after_rolling_thickness_m": after_rolling_m
                 })
 
-                # Debug: show average thickness for this segment
-                thicknesses = [p["thickness_positive_m"] for p in seg_poly_points]
-                avg_seg = np.mean(thicknesses) if thicknesses else 0.0
-                self.message_text.append(f"Segment {seg_num}: avg positive thickness = {avg_seg:.3f} m")
+                # Add segment label on graph (midpoint of segment)
+                mid_x = (seg_from_m + seg_to_m) / 2
+                mid_y_idx = np.argmin(np.abs(all_chainages - mid_x))
+                mid_y = all_elevations[mid_y_idx] + 0.25  # slightly above line
 
-            # Save with calculated thicknesses
-            self.save_material_segment_to_json(
-                material_idx=idx,
-                config=config,
-                from_m=from_m,
-                to_m=to_m,
-                segments_list=segments
-            )
+                label_text = f"M{idx+1}-{seg_num}"
+                if nominal_thickness_m > 0:
+                    label_text += f" ({nominal_thickness_m*1000:.0f}mm)"
 
-            self.draw_material_filling(
-                from_chainage_m=from_m,
-                to_chainage_m=to_m,
-                thickness_m=thickness_m,
-                material_index=idx,
-                material_config=self.material_configs[idx],
-                color='#FF9800',
-                alpha=0.6,
-                width_m=width_m
-            )
+                annot = self.ax.annotate(
+                    label_text,
+                    (mid_x, mid_y),
+                    xytext=(0, 12),
+                    textcoords='offset points',
+                    ha='center', va='bottom',
+                    fontsize=9, fontweight='bold', color='white',
+                    bbox=dict(boxstyle='round,pad=0.4',
+                            facecolor='orange', alpha=0.9, edgecolor='darkorange'),
+                    picker=10
+                )
 
-            total_segs = len(segments)
-            self.message_text.append(
-                f"Material M{idx+1} saved successfully!\n"
-                f"→ {total_segs} segments created with REAL height calculation"
-            )
-        else:
-            self.message_text.append("Configuration cancelled.")
+                annot.point_data = {
+                    'type': 'material_segment_label',
+                    'material_index': idx,
+                    'segment_number': seg_num,
+                    'from_chainage_m': seg_from_m,
+                    'to_chainage_m': seg_to_m,
+                    'config': {}
+                }
+
+                self.material_segment_labels.setdefault(idx, []).append(annot)
+
+        # 8. Save JSON
+        self.save_material_segment_to_json(
+            material_idx=idx,
+            config=config,
+            from_m=from_m,
+            to_m=to_m,
+            segments_list=segments
+        )
+
+        # 9. Draw filling
+        self.draw_material_filling(
+            from_chainage_m=from_m,
+            to_chainage_m=to_m,
+            thickness_m=nominal_thickness_m,
+            material_index=idx,
+            material_config=self.material_configs[idx],
+            color='#FF9800',
+            alpha=0.6,
+            width_m=width_m
+        )
+
+        self.message_text.append(
+            f"Material M{idx+1} saved → {len(segments)} segments (~20m each) "
+            f"with dense 2m points + per-point 2m intervals in from/to strings"
+        )
 
         self.canvas.draw_idle()
         self.material_drawing_points = []
 
+# ======================================================================
+    def _get_xyz_tuple(self, chainage):
+        """Small helper to get [X, Y, Z] rounded tuple"""
+        x, y, z = self.get_real_coordinates_from_chainage(chainage)
+        if x is None:
+            x, y, z = self.interpolate_xyz(chainage)
+        return [round(float(x), 3), round(float(y), 3), round(float(z), 3)]
+
+    def _cleanup_drawing_preview_and_labels(self):
+        """Internal cleanup helper"""
+        if hasattr(self, 'current_material_line_artist') and self.current_material_line_artist:
+            self.current_material_line_artist.remove()
+            self.current_material_line_artist = None
+
+        idx = self.active_material_index
+        if idx in self.material_segment_labels:
+            for label in self.material_segment_labels[idx]:
+                label.remove()
+            self.material_segment_labels[idx] = []
 # =======================================================================================================================================
 # CONSOLIDATED: Single setup_label_click_handler (remove duplicates; use unified on_label_pick)
 # =======================================================================================================================================
