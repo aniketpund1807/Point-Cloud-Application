@@ -1,16 +1,17 @@
 import mysql.connector
 from mysql.connector import Error
 
-# Database configuration
-# DB_CONFIG = {
-#     'host': 'localhost',
-#     'user': 'root',
-#     'password': '',
-#     'database': 'integrated',
-#     'port': 3306
-# }
+# Local database configuration
+DB_CONFIG = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '',
+    'database': 'integrated',
+    'port': 3306
+}
 
 
+# Live server database configuration
 DB_CONFIG = {
     'host': '103.212.120.166 ',
     'user': 'injlgsty_integrated',
